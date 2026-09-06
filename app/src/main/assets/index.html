@@ -69,6 +69,7 @@
   .profit-neg{ color:var(--red); }
   .profit-pos{ color:var(--teal); }
   .table-wrap{ overflow-x:auto; }
+  #resultsEmpty[hidden], #resultsTableWrap[hidden]{ display:none; }
 
   .bar-row{ display:flex; align-items:center; gap:10px; font-size:12.5px; margin-bottom:8px; }
   .bar-row .label{ width:78px; flex-shrink:0; color:var(--ink-soft); }
@@ -107,7 +108,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-/* ============ SIZES ============ */
+/* ============ SIZES / FIELDS ============ */
 const SIZES = [
   { key:'s10', label:'10" brick', defaultWeight:1 },
   { key:'s15', label:'15" brick', defaultWeight:1.5 },
@@ -127,7 +128,6 @@ const state = {
   qty: { s10:'', s15:'', s20:'' },
   weight: { s10:1, s15:1.5, s20:2 },
   price: { s10:'', s15:'', s20:'' },
-  advOpen: false,
   history: [],
 };
 
@@ -141,10 +141,11 @@ function saveHistory(){
 }
 
 /* ============ HELPERS ============ */
+function $(id){ return document.getElementById(id); }
 function num(v){ const n = parseFloat(v); return isNaN(n) || n<0 ? 0 : n; }
 function fmt(n){ return Number(n||0).toLocaleString('en-US', { maximumFractionDigits:2 }); }
 function showToast(msg){
-  const t = document.getElementById('toast');
+  const t = $('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 1800);
 }
@@ -173,178 +174,194 @@ function totalProfit(){
   }, 0);
 }
 
-/* ============ RENDER ============ */
-function render(){
-  const app = document.getElementById('app');
+/* ============ ONE-TIME SKELETON BUILD ============ */
+function buildSkeleton(){
+  const app = $('app');
   app.innerHTML = `
-  <div id="app-inner">
     <div class="topbar">
       <div class="name">Brick Factory Cost Calculator</div>
       <div class="sub">Enter your manufacturing costs and production quantities to find the true cost and profit per brick.</div>
     </div>
 
-    ${renderCostCard()}
-    ${renderProductionCard()}
-    ${renderResultsCard()}
-    ${renderCostBreakdownCard()}
-
-    <div class="btn-row">
-      <button class="btn-secondary" onclick="resetForm()">Reset</button>
-      <button class="btn-primary" onclick="saveBatch()">Save this batch</button>
+    <div class="card">
+      <h2>Manufacturing costs</h2>
+      <p class="hint">Total cost for this production batch, in ETB.</p>
+      <div class="field-grid">
+        ${COST_FIELDS.map(f=>`
+          <div class="field">
+            <label>${f.label}</label>
+            <input type="number" min="0" inputmode="decimal" id="cost-${f.key}" placeholder="0">
+          </div>`).join('')}
+      </div>
+      <div class="total-line"><span>Total manufacturing cost</span><span class="amt" id="out-totalCost">0 ETB</span></div>
     </div>
 
-    ${renderHistoryCard()}
-  </div>`;
-}
-
-function renderCostCard(){
-  return `
-  <div class="card">
-    <h2>Manufacturing costs</h2>
-    <p class="hint">Total cost for this production batch, in ETB.</p>
-    <div class="field-grid">
-      ${COST_FIELDS.map(f=>`
-        <div class="field">
-          <label>${f.label}</label>
-          <input type="number" min="0" inputmode="decimal" value="${state.costs[f.key]}"
-            oninput="updateCost('${f.key}', this.value)" placeholder="0">
-        </div>`).join('')}
-    </div>
-    <div class="total-line"><span>Total manufacturing cost</span><span class="amt">${fmt(totalCost())} ETB</span></div>
-  </div>`;
-}
-
-function renderProductionCard(){
-  return `
-  <div class="card">
-    <h2>Production quantities</h2>
-    <p class="hint">How many of each brick size came out of this batch.</p>
-    <div class="field-grid">
-      ${SIZES.map(sz=>`
-        <div class="field">
-          <label>${sz.label}</label>
-          <input type="number" min="0" inputmode="decimal" value="${state.qty[sz.key]}"
-            oninput="updateQty('${sz.key}', this.value)" placeholder="0">
-        </div>`).join('')}
-    </div>
-    <button class="adv-toggle" onclick="toggleAdv()">${state.advOpen ? 'Hide' : 'Adjust'} material-weight ratios &#9662;</button>
-    <div class="adv-body" ${state.advOpen ? '' : 'hidden'}>
-      <p class="hint" style="margin-bottom:10px;">
-        A bigger brick uses more raw material, so its share of the cost should be bigger too.
-        These weights say how much material each size uses relative to the 10" brick (default 1&nbsp;:&nbsp;1.5&nbsp;:&nbsp;2). Adjust if your mix is different.
-      </p>
+    <div class="card">
+      <h2>Production quantities</h2>
+      <p class="hint">How many of each brick size came out of this batch.</p>
       <div class="field-grid">
         ${SIZES.map(sz=>`
           <div class="field">
-            <label>${sz.label} weight</label>
-            <input type="number" min="0.01" step="0.01" value="${state.weight[sz.key]}"
-              oninput="updateWeight('${sz.key}', this.value)">
+            <label>${sz.label}</label>
+            <input type="number" min="0" inputmode="decimal" id="qty-${sz.key}" placeholder="0">
+          </div>`).join('')}
+      </div>
+      <button class="adv-toggle" id="advToggleBtn">Adjust material-weight ratios &#9662;</button>
+      <div class="adv-body" id="advBody" hidden>
+        <p class="hint" style="margin-bottom:10px;">
+          A bigger brick uses more raw material, so its share of the cost should be bigger too.
+          These weights say how much material each size uses relative to the 10" brick (default 1&nbsp;:&nbsp;1.5&nbsp;:&nbsp;2). Adjust if your mix is different.
+        </p>
+        <div class="field-grid">
+          ${SIZES.map(sz=>`
+            <div class="field">
+              <label>${sz.label} weight</label>
+              <input type="number" min="0.01" step="0.01" id="weight-${sz.key}">
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cost &amp; profit per brick</h2>
+      <p class="hint">Selling price is optional &mdash; add it to see your profit per brick and per size.</p>
+      <div class="empty-hint" id="resultsEmpty">Enter production quantities above to see the cost breakdown.</div>
+      <div class="table-wrap" id="resultsTableWrap" hidden>
+        <table>
+          <thead><tr>
+            <th>Size</th><th>Qty</th><th>Cost / brick</th><th>Total cost</th><th>Selling price</th><th>Profit / brick</th><th>Total profit</th>
+          </tr></thead>
+          <tbody>
+            ${SIZES.map(sz=>`
+              <tr>
+                <td>${sz.label}</td>
+                <td id="out-qty-${sz.key}">0</td>
+                <td id="out-unitCost-${sz.key}">0 ETB</td>
+                <td id="out-lineCost-${sz.key}">0 ETB</td>
+                <td><input type="number" min="0" inputmode="decimal" id="price-${sz.key}" placeholder="&ndash;"></td>
+                <td id="out-profitUnit-${sz.key}">&ndash;</td>
+                <td id="out-profitLine-${sz.key}">&ndash;</td>
+              </tr>`).join('')}
+            <tr class="grand">
+              <td>Total</td>
+              <td id="out-grandQty">0</td>
+              <td></td>
+              <td class="amt" id="out-grandCost">0 ETB</td>
+              <td></td>
+              <td></td>
+              <td class="amt" id="out-grandProfit">0 ETB</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Where the cost goes</h2>
+      <div style="margin-top:10px;">
+        ${COST_FIELDS.map(f=>`
+          <div class="bar-row">
+            <div class="label">${f.label}</div>
+            <div class="bar-track"><div class="bar-fill" id="bar-fill-${f.key}" style="width:0%;"></div></div>
+            <div class="val" id="bar-val-${f.key}">0%</div>
           </div>`).join('')}
       </div>
     </div>
-  </div>`;
-}
 
-function renderResultsCard(){
-  const eq = equivalentUnits();
-  return `
-  <div class="card">
-    <h2>Cost &amp; profit per brick</h2>
-    <p class="hint">Selling price is optional &mdash; add it to see your profit per brick and per size.</p>
-    ${eq<=0 ? `<div class="empty-hint">Enter production quantities above to see the cost breakdown.</div>` : `
-    <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Size</th><th>Qty</th><th>Cost / brick</th><th>Total cost</th><th>Selling price</th><th>Profit / brick</th><th>Total profit</th>
-      </tr></thead>
-      <tbody>
-        ${SIZES.map(sz=>{
-          const qty = num(state.qty[sz.key]);
-          const unitCost = unitCostFor(sz.key);
-          const lineCost = unitCost*qty;
-          const price = state.price[sz.key];
-          const hasPrice = price!=='' && price!=null;
-          const profitUnit = hasPrice ? num(price)-unitCost : null;
-          const profitLine = hasPrice ? profitUnit*qty : null;
-          return `<tr>
-            <td>${sz.label}</td>
-            <td>${fmt(qty)}</td>
-            <td>${fmt(unitCost)} ETB</td>
-            <td>${fmt(lineCost)} ETB</td>
-            <td><input type="number" min="0" inputmode="decimal" value="${state.price[sz.key]}" placeholder="&ndash;"
-                  oninput="updatePrice('${sz.key}', this.value)"></td>
-            <td class="${hasPrice ? (profitUnit>=0?'profit-pos':'profit-neg') : ''}">${hasPrice ? fmt(profitUnit)+' ETB' : '&ndash;'}</td>
-            <td class="${hasPrice ? (profitLine>=0?'profit-pos':'profit-neg') : ''}">${hasPrice ? fmt(profitLine)+' ETB' : '&ndash;'}</td>
-          </tr>`;
-        }).join('')}
-        <tr class="grand">
-          <td>Total</td>
-          <td>${fmt(totalQty())}</td>
-          <td></td>
-          <td class="amt">${fmt(totalCost())} ETB</td>
-          <td></td>
-          <td></td>
-          <td class="amt">${fmt(totalProfit())} ETB</td>
-        </tr>
-      </tbody>
-    </table>
-    </div>`}
-  </div>`;
-}
-
-function renderCostBreakdownCard(){
-  const total = totalCost();
-  if (total<=0) return '';
-  return `
-  <div class="card">
-    <h2>Where the cost goes</h2>
-    <div style="margin-top:10px;">
-      ${COST_FIELDS.map(f=>{
-        const v = num(state.costs[f.key]);
-        const pct = total>0 ? (v/total*100) : 0;
-        return `<div class="bar-row">
-          <div class="label">${f.label}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div>
-          <div class="val">${fmt(pct)}%</div>
-        </div>`;
-      }).join('')}
+    <div class="btn-row">
+      <button class="btn-secondary" id="resetBtn">Reset</button>
+      <button class="btn-primary" id="saveBatchBtn">Save this batch</button>
     </div>
-  </div>`;
+
+    <div class="card">
+      <h2>Saved batches</h2>
+      <div id="historyList"></div>
+    </div>
+  `;
+
+  COST_FIELDS.forEach(f=>{
+    $(`cost-${f.key}`).addEventListener('input', e=>{ state.costs[f.key] = e.target.value; recompute(); });
+  });
+  SIZES.forEach(sz=>{
+    $(`qty-${sz.key}`).addEventListener('input', e=>{ state.qty[sz.key] = e.target.value; recompute(); });
+    $(`weight-${sz.key}`).value = state.weight[sz.key];
+    $(`weight-${sz.key}`).addEventListener('input', e=>{
+      state.weight[sz.key] = e.target.value===''? '' : parseFloat(e.target.value);
+      recompute();
+    });
+    $(`price-${sz.key}`).addEventListener('input', e=>{ state.price[sz.key] = e.target.value; recompute(); });
+  });
+
+  $('advToggleBtn').addEventListener('click', ()=>{
+    const body = $('advBody');
+    body.hidden = !body.hidden;
+    $('advToggleBtn').innerHTML = (body.hidden ? 'Adjust' : 'Hide') + ' material-weight ratios &#9662;';
+  });
+  $('resetBtn').addEventListener('click', resetForm);
+  $('saveBatchBtn').addEventListener('click', saveBatch);
 }
 
-function renderHistoryCard(){
-  return `
-  <div class="card">
-    <h2>Saved batches</h2>
-    ${state.history.length===0 ? `<div class="empty-hint">No batches saved yet.</div>` :
-    state.history.slice().reverse().map(b=>`
-      <div class="history-item">
-        <div>
-          <div>${fmt(b.totalCost)} ETB &middot; ${fmt(b.totalQty)} bricks</div>
-          <div class="hi-date">${new Date(b.savedAt).toLocaleString()}</div>
-        </div>
-        <div class="history-actions">
-          <button onclick="loadBatch('${b.id}')">Load</button>
-          <button onclick="deleteBatch('${b.id}')">Delete</button>
-        </div>
-      </div>`).join('')}
-  </div>`;
+/* ============ TARGETED RECOMPUTE (never rebuilds inputs) ============ */
+function recompute(){
+  $('out-totalCost').textContent = fmt(totalCost()) + ' ETB';
+
+  const eq = equivalentUnits();
+  $('resultsEmpty').hidden = eq > 0;
+  $('resultsTableWrap').hidden = eq <= 0;
+
+  if (eq > 0){
+    SIZES.forEach(sz=>{
+      const qty = num(state.qty[sz.key]);
+      const unitCost = unitCostFor(sz.key);
+      const lineCost = unitCost*qty;
+      const price = state.price[sz.key];
+      const hasPrice = price!=='' && price!=null;
+      const profitUnit = hasPrice ? num(price)-unitCost : null;
+      const profitLine = hasPrice ? profitUnit*qty : null;
+
+      $(`out-qty-${sz.key}`).textContent = fmt(qty);
+      $(`out-unitCost-${sz.key}`).textContent = fmt(unitCost) + ' ETB';
+      $(`out-lineCost-${sz.key}`).textContent = fmt(lineCost) + ' ETB';
+
+      const profitUnitEl = $(`out-profitUnit-${sz.key}`);
+      const profitLineEl = $(`out-profitLine-${sz.key}`);
+      profitUnitEl.textContent = hasPrice ? fmt(profitUnit)+' ETB' : '–';
+      profitUnitEl.className = hasPrice ? (profitUnit>=0?'profit-pos':'profit-neg') : '';
+      profitLineEl.textContent = hasPrice ? fmt(profitLine)+' ETB' : '–';
+      profitLineEl.className = hasPrice ? (profitLine>=0?'profit-pos':'profit-neg') : '';
+    });
+    $('out-grandQty').textContent = fmt(totalQty());
+    $('out-grandCost').textContent = fmt(totalCost()) + ' ETB';
+    $('out-grandProfit').textContent = fmt(totalProfit()) + ' ETB';
+  }
+
+  const total = totalCost();
+  COST_FIELDS.forEach(f=>{
+    const v = num(state.costs[f.key]);
+    const pct = total>0 ? (v/total*100) : 0;
+    $(`bar-fill-${f.key}`).style.width = pct + '%';
+    $(`bar-val-${f.key}`).textContent = fmt(pct) + '%';
+  });
 }
 
 /* ============ ACTIONS ============ */
-function updateCost(key, val){ state.costs[key] = val; render(); }
-function updateQty(key, val){ state.qty[key] = val; render(); }
-function updateWeight(key, val){ state.weight[key] = val===''? '' : parseFloat(val); render(); }
-function updatePrice(key, val){ state.price[key] = val; render(); }
-function toggleAdv(){ state.advOpen = !state.advOpen; render(); }
-
 function resetForm(){
   if (!confirm('Clear all costs, quantities and prices?')) return;
   state.costs = { komiche:'', cement:'', labor:'', water:'', other:'' };
   state.qty = { s10:'', s15:'', s20:'' };
   state.price = { s10:'', s15:'', s20:'' };
   state.weight = { s10:1, s15:1.5, s20:2 };
-  render();
+  applyStateToInputs();
+  recompute();
+}
+
+function applyStateToInputs(){
+  COST_FIELDS.forEach(f=>{ $(`cost-${f.key}`).value = state.costs[f.key]; });
+  SIZES.forEach(sz=>{
+    $(`qty-${sz.key}`).value = state.qty[sz.key];
+    $(`weight-${sz.key}`).value = state.weight[sz.key];
+    $(`price-${sz.key}`).value = state.price[sz.key];
+  });
 }
 
 function saveBatch(){
@@ -363,7 +380,7 @@ function saveBatch(){
   state.history.push(batch);
   saveHistory();
   showToast('Batch saved');
-  render();
+  renderHistory();
 }
 function loadBatch(id){
   const b = state.history.find(x=>x.id===id);
@@ -372,21 +389,45 @@ function loadBatch(id){
   state.qty = {...b.qty};
   state.weight = {...b.weight};
   state.price = {...b.price};
+  applyStateToInputs();
+  recompute();
   showToast('Batch loaded');
-  render();
   window.scrollTo(0,0);
 }
 function deleteBatch(id){
   if (!confirm('Delete this saved batch?')) return;
   state.history = state.history.filter(x=>x.id!==id);
   saveHistory();
-  render();
+  renderHistory();
+}
+window.loadBatch = loadBatch;
+window.deleteBatch = deleteBatch;
+
+function renderHistory(){
+  const el = $('historyList');
+  if (state.history.length===0){
+    el.innerHTML = `<div class="empty-hint">No batches saved yet.</div>`;
+    return;
+  }
+  el.innerHTML = state.history.slice().reverse().map(b=>`
+    <div class="history-item">
+      <div>
+        <div>${fmt(b.totalCost)} ETB &middot; ${fmt(b.totalQty)} bricks</div>
+        <div class="hi-date">${new Date(b.savedAt).toLocaleString()}</div>
+      </div>
+      <div class="history-actions">
+        <button onclick="loadBatch('${b.id}')">Load</button>
+        <button onclick="deleteBatch('${b.id}')">Delete</button>
+      </div>
+    </div>`).join('');
 }
 
 /* ============ BOOT ============ */
 (function boot(){
   loadHistory();
-  render();
+  buildSkeleton();
+  recompute();
+  renderHistory();
 })();
 </script>
 </body>
