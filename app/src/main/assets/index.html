@@ -177,6 +177,7 @@ const ICONS = {
   boxes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 21v-9"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H4a1 1 0 00-1 1v8l10 10 9-9L12 2z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v4M16 3v4"/></svg>',
+  export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4"/></svg>',
 };
 
 /* ============ STATE (persisted arrays are the source of truth) ============ */
@@ -524,6 +525,14 @@ function buildSkeleton(){
       <p class="hint">Every month with data, most recent first. Tap a month to see its daily entries &mdash; Edit any of them to fix a mistake, or Delete to remove it.</p>
       <div id="historyList"></div>
     </div>
+
+    <div class="card">
+      <h2><span class="card-icon">${ICONS.export}</span>Export</h2>
+      <p class="hint">Save every cost, production, and sales entry as a spreadsheet, then send it to Google Drive, email, or any app you choose.</p>
+      <div class="btn-row" style="margin:0;">
+        <button class="btn-primary" id="exportBtn">Export all data</button>
+      </div>
+    </div>
     </div>
 
     <div class="tabbar">
@@ -566,6 +575,8 @@ function buildSkeleton(){
   document.querySelectorAll('.tab').forEach(btn=>{
     btn.addEventListener('click', ()=>showScreen(btn.dataset.screen));
   });
+
+  $('exportBtn').addEventListener('click', exportData);
 }
 
 function showScreen(name){
@@ -796,6 +807,62 @@ window.deleteCostEntry = deleteCostEntry;
 window.deleteProductionEntry = deleteProductionEntry;
 window.deleteSaleEntry = deleteSaleEntry;
 window.toggleMonthDetail = toggleMonthDetail;
+
+/* ============ EXPORT TO EXCEL (SpreadsheetML, shared via native Share sheet) ============ */
+function xmlEscape(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[m])); }
+function cellStr(v){ return `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`; }
+function cellNum(v){ return `<Cell><Data ss:Type="Number">${Number(v||0)}</Data></Cell>`; }
+function rowXml(cells){ return `<Row>${cells.join('')}</Row>`; }
+
+function buildExportXml(){
+  const costs = state.costEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
+  const costsHeader = rowXml(['Date','Komiche Cost','Komiche Cars','Cement Cost','Cement Kuntal','Labor','Water','Other','Total'].map(cellStr));
+  const costsRows = costs.map(e=>rowXml([
+    cellStr(dayLabel(e.dateKey)), cellNum(e.komicheCost), cellNum(e.komicheCars),
+    cellNum(e.cementCost), cellNum(e.cementKuntal), cellNum(e.labor), cellNum(e.water), cellNum(e.other),
+    cellNum(e.komicheCost+e.cementCost+e.labor+e.water+e.other),
+  ])).join('');
+
+  const prods = state.productionEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
+  const prodHeader = rowXml(['Date','10" Qty','15" Qty','20" Qty','Total'].map(cellStr));
+  const prodRows = prods.map(e=>rowXml([
+    cellStr(dayLabel(e.dateKey)), cellNum(e.qty.s10), cellNum(e.qty.s15), cellNum(e.qty.s20),
+    cellNum(e.qty.s10+e.qty.s15+e.qty.s20),
+  ])).join('');
+
+  const sales = state.salesEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
+  const salesHeader = rowXml(['Date','10" Qty','10" Price','15" Qty','15" Price','20" Qty','20" Price','Total Revenue'].map(cellStr));
+  const salesRows = sales.map(e=>{
+    const total = SIZES.reduce((a,sz)=>a+num(e.sizes[sz.key].qty)*num(e.sizes[sz.key].price),0);
+    return rowXml([
+      cellStr(dayLabel(e.dateKey)),
+      cellNum(e.sizes.s10.qty), cellNum(e.sizes.s10.price),
+      cellNum(e.sizes.s15.qty), cellNum(e.sizes.s15.price),
+      cellNum(e.sizes.s20.qty), cellNum(e.sizes.s20.price),
+      cellNum(total),
+    ]);
+  }).join('');
+
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Costs"><Table>${costsHeader}${costsRows}</Table></Worksheet>
+ <Worksheet ss:Name="Production"><Table>${prodHeader}${prodRows}</Table></Worksheet>
+ <Worksheet ss:Name="Sales"><Table>${salesHeader}${salesRows}</Table></Worksheet>
+</Workbook>`;
+}
+
+function exportData(){
+  const totalEntries = state.costEntries.length + state.productionEntries.length + state.salesEntries.length;
+  if (totalEntries===0){ showToast('No data to export yet'); return; }
+  const xml = buildExportXml();
+  const filename = 'brick-factory-export-' + todayInputValue() + '.xls';
+  if (window.AndroidExport && window.AndroidExport.shareFile){
+    window.AndroidExport.shareFile(filename, xml);
+  } else {
+    showToast('Export is only available in the app');
+  }
+}
 
 /* ============ RENDER: THIS MONTH ============ */
 function renderMonth(){
