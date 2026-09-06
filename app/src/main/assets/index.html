@@ -141,6 +141,7 @@ const state = {
   reportPeriod: 3,       // 3 | 6 | 9 | 13 (13 = full year incl. Pagume)
   reportYear: null,
   openMonthKey: null,
+  editing: { cost:null, production:null, sale:null }, // holds the id being edited, per form
 };
 
 function loadData(){
@@ -167,10 +168,34 @@ function jdnToEthiopian(jdn){
   const day = (n % 30) + 1;
   return { year, month, day };
 }
+function ethiopianToJdn(year, month, day){
+  const n = 30*(month-1) + (day-1);
+  const cycles = Math.floor(year/4);
+  const k = year - 4*cycles;
+  const r = (n === 365) ? 1460 : (k*365 + n);
+  return 1461*cycles + r + JD_EPOCH_OFFSET_AMETE_MIHRET;
+}
+function jdnToGregorian(jdn){
+  const a = jdn + 32044;
+  const b = Math.floor((4*a+3)/146097);
+  const c = a - Math.floor((146097*b)/4);
+  const d = Math.floor((4*c+3)/1461);
+  const e = c - Math.floor((1461*d)/4);
+  const m = Math.floor((5*e+2)/153);
+  const day = e - Math.floor((153*m+2)/5) + 1;
+  const month = m + 3 - 12*Math.floor(m/10);
+  const year = 100*b + d - 4800 + Math.floor(m/10);
+  return { year, month, day };
+}
 function pad2(n){ return String(n).padStart(2,'0'); }
 function ethFromDateStr(str){
   const [y,m,d] = str.split('-').map(Number);
   return jdnToEthiopian(gregorianToJdn(y,m,d));
+}
+function dateKeyToGregorianInput(dateKey){
+  const [y,m,d] = dateKey.split('-').map(Number);
+  const g = jdnToGregorian(ethiopianToJdn(y,m,d));
+  return g.year + '-' + pad2(g.month) + '-' + pad2(g.day);
 }
 function ethDateKey(e){ return e.year + '-' + pad2(e.month) + '-' + pad2(e.day); }
 function ethMonthKey(e){ return e.year + '-' + pad2(e.month); }
@@ -361,6 +386,7 @@ function buildSkeleton(){
       </div>
       <div class="total-line"><span>Total for this day</span><span class="amt" id="out-costEntryTotal">0 ETB</span></div>
       <div class="btn-row" style="margin-top:16px; margin-bottom:0;">
+        <button class="btn-secondary" id="costCancelBtn" hidden>Cancel</button>
         <button class="btn-primary" id="addCostBtn">Add cost entry</button>
       </div>
     </div>
@@ -380,6 +406,7 @@ function buildSkeleton(){
           </div>`).join('')}
       </div>
       <div class="btn-row" style="margin-top:6px; margin-bottom:0;">
+        <button class="btn-secondary" id="prodCancelBtn" hidden>Cancel</button>
         <button class="btn-primary" id="addProdBtn">Add production entry</button>
       </div>
     </div>
@@ -401,6 +428,7 @@ function buildSkeleton(){
         </div>`).join('')}
       <div class="total-line"><span>Total for this sale</span><span class="amt" id="out-saleEntryTotal">0 ETB</span></div>
       <div class="btn-row" style="margin-top:16px; margin-bottom:0;">
+        <button class="btn-secondary" id="saleCancelBtn" hidden>Cancel</button>
         <button class="btn-primary" id="addSaleBtn">Add sale entry</button>
       </div>
     </div>
@@ -426,7 +454,7 @@ function buildSkeleton(){
 
     <div class="card">
       <h2>Monthly history</h2>
-      <p class="hint">Every month with data, most recent first. Tap a month to see its daily entries.</p>
+      <p class="hint">Every month with data, most recent first. Tap a month to see its daily entries &mdash; Edit any of them to fix a mistake, or Delete to remove it.</p>
       <div id="historyList"></div>
     </div>
   `;
@@ -439,13 +467,16 @@ function buildSkeleton(){
     $(id).addEventListener('input', updateCostEntryTotal);
   });
   $('addCostBtn').addEventListener('click', addCostEntry);
+  $('costCancelBtn').addEventListener('click', cancelEditCost);
   $('addProdBtn').addEventListener('click', addProductionEntry);
+  $('prodCancelBtn').addEventListener('click', cancelEditProduction);
 
   SIZES.forEach(sz=>{
     $(`saleQty-${sz.key}`).addEventListener('input', updateSaleEntryTotal);
     $(`salePrice-${sz.key}`).addEventListener('input', updateSaleEntryTotal);
   });
   $('addSaleBtn').addEventListener('click', addSaleEntry);
+  $('saleCancelBtn').addEventListener('click', cancelEditSale);
 
   document.querySelectorAll('.seg-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -471,6 +502,21 @@ function updateSaleEntryTotal(){
 }
 
 /* ============ ACTIONS ============ */
+function clearCostForm(){
+  ['komicheCost','komicheCars','cementCost','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
+  $('costDate').value = todayInputValue();
+  updateCostEntryTotal();
+}
+function clearProdForm(){
+  SIZES.forEach(sz=>{ $(`prodQty-${sz.key}`).value = ''; });
+  $('prodDate').value = todayInputValue();
+}
+function clearSaleForm(){
+  SIZES.forEach(sz=>{ $(`saleQty-${sz.key}`).value = ''; $(`salePrice-${sz.key}`).value = ''; });
+  $('saleDate').value = todayInputValue();
+  updateSaleEntryTotal();
+}
+
 function addCostEntry(){
   const dateStr = $('costDate').value || todayInputValue();
   const komicheCost = num($('komicheCost').value);
@@ -484,18 +530,21 @@ function addCostEntry(){
   if (total<=0){ showToast('Enter at least one cost amount'); return; }
 
   const eth = ethFromDateStr(dateStr);
-  const entry = {
-    id: uid(), dateKey: ethDateKey(eth), monthKey: ethMonthKey(eth),
-    komicheCost, komicheCars, cementCost, cementKuntal, labor, water, other,
-    createdAt: Date.now(),
-  };
-  state.costEntries.push(entry);
-  saveCosts();
+  const dateKey = ethDateKey(eth), monthKey = ethMonthKey(eth);
+  const wasEditing = state.editing.cost;
 
-  ['komicheCost','komicheCars','cementCost','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
-  $('costDate').value = todayInputValue();
-  updateCostEntryTotal();
-  showToast('Added to ' + dayLabel(entry.dateKey));
+  if (wasEditing){
+    const e = state.costEntries.find(x=>x.id===wasEditing);
+    if (e) Object.assign(e, { dateKey, monthKey, komicheCost, komicheCars, cementCost, cementKuntal, labor, water, other, updatedAt: Date.now() });
+    state.editing.cost = null;
+    $('addCostBtn').textContent = 'Add cost entry';
+    $('costCancelBtn').hidden = true;
+  } else {
+    state.costEntries.push({ id: uid(), dateKey, monthKey, komicheCost, komicheCars, cementCost, cementKuntal, labor, water, other, createdAt: Date.now() });
+  }
+  saveCosts();
+  clearCostForm();
+  showToast(wasEditing ? 'Cost entry updated' : 'Added to ' + dayLabel(dateKey));
 
   renderMonth();
   renderReport();
@@ -510,13 +559,21 @@ function addProductionEntry(){
   if (total<=0){ showToast('Enter at least one quantity'); return; }
 
   const eth = ethFromDateStr(dateStr);
-  const entry = { id: uid(), dateKey: ethDateKey(eth), monthKey: ethMonthKey(eth), qty, createdAt: Date.now() };
-  state.productionEntries.push(entry);
-  saveProduction();
+  const dateKey = ethDateKey(eth), monthKey = ethMonthKey(eth);
+  const wasEditing = state.editing.production;
 
-  SIZES.forEach(sz=>{ $(`prodQty-${sz.key}`).value = ''; });
-  $('prodDate').value = todayInputValue();
-  showToast('Added to ' + dayLabel(entry.dateKey));
+  if (wasEditing){
+    const e = state.productionEntries.find(x=>x.id===wasEditing);
+    if (e) Object.assign(e, { dateKey, monthKey, qty, updatedAt: Date.now() });
+    state.editing.production = null;
+    $('addProdBtn').textContent = 'Add production entry';
+    $('prodCancelBtn').hidden = true;
+  } else {
+    state.productionEntries.push({ id: uid(), dateKey, monthKey, qty, createdAt: Date.now() });
+  }
+  saveProduction();
+  clearProdForm();
+  showToast(wasEditing ? 'Production entry updated' : 'Added to ' + dayLabel(dateKey));
 
   renderMonth();
   renderReport();
@@ -536,36 +593,111 @@ function addSaleEntry(){
   if (total<=0){ showToast('Enter a quantity and price for at least one size'); return; }
 
   const eth = ethFromDateStr(dateStr);
-  const entry = { id: uid(), dateKey: ethDateKey(eth), monthKey: ethMonthKey(eth), sizes, createdAt: Date.now() };
-  state.salesEntries.push(entry);
-  saveSales();
+  const dateKey = ethDateKey(eth), monthKey = ethMonthKey(eth);
+  const wasEditing = state.editing.sale;
 
-  SIZES.forEach(sz=>{ $(`saleQty-${sz.key}`).value = ''; $(`salePrice-${sz.key}`).value = ''; });
-  $('saleDate').value = todayInputValue();
-  updateSaleEntryTotal();
-  showToast('Added to ' + dayLabel(entry.dateKey));
+  if (wasEditing){
+    const e = state.salesEntries.find(x=>x.id===wasEditing);
+    if (e) Object.assign(e, { dateKey, monthKey, sizes, updatedAt: Date.now() });
+    state.editing.sale = null;
+    $('addSaleBtn').textContent = 'Add sale entry';
+    $('saleCancelBtn').hidden = true;
+  } else {
+    state.salesEntries.push({ id: uid(), dateKey, monthKey, sizes, createdAt: Date.now() });
+  }
+  saveSales();
+  clearSaleForm();
+  showToast(wasEditing ? 'Sale entry updated' : 'Added to ' + dayLabel(dateKey));
 
   renderMonth();
   renderReport();
   renderHistory();
 }
 
+function startEditCost(id){
+  const e = state.costEntries.find(x=>x.id===id);
+  if (!e) return;
+  $('costDate').value = dateKeyToGregorianInput(e.dateKey);
+  $('komicheCost').value = e.komicheCost || '';
+  $('komicheCars').value = e.komicheCars || '';
+  $('cementCost').value = e.cementCost || '';
+  $('cementKuntal').value = e.cementKuntal || '';
+  $('laborCost').value = e.labor || '';
+  $('waterCost').value = e.water || '';
+  $('otherCost').value = e.other || '';
+  updateCostEntryTotal();
+  state.editing.cost = id;
+  $('addCostBtn').textContent = 'Save changes';
+  $('costCancelBtn').hidden = false;
+  $('costDate').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+function cancelEditCost(){
+  state.editing.cost = null;
+  clearCostForm();
+  $('addCostBtn').textContent = 'Add cost entry';
+  $('costCancelBtn').hidden = true;
+}
+
+function startEditProduction(id){
+  const e = state.productionEntries.find(x=>x.id===id);
+  if (!e) return;
+  $('prodDate').value = dateKeyToGregorianInput(e.dateKey);
+  SIZES.forEach(sz=>{ $(`prodQty-${sz.key}`).value = e.qty[sz.key] || ''; });
+  state.editing.production = id;
+  $('addProdBtn').textContent = 'Save changes';
+  $('prodCancelBtn').hidden = false;
+  $('prodDate').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+function cancelEditProduction(){
+  state.editing.production = null;
+  clearProdForm();
+  $('addProdBtn').textContent = 'Add production entry';
+  $('prodCancelBtn').hidden = true;
+}
+
+function startEditSale(id){
+  const e = state.salesEntries.find(x=>x.id===id);
+  if (!e) return;
+  $('saleDate').value = dateKeyToGregorianInput(e.dateKey);
+  SIZES.forEach(sz=>{
+    $(`saleQty-${sz.key}`).value = e.sizes[sz.key].qty || '';
+    $(`salePrice-${sz.key}`).value = e.sizes[sz.key].price || '';
+  });
+  updateSaleEntryTotal();
+  state.editing.sale = id;
+  $('addSaleBtn').textContent = 'Save changes';
+  $('saleCancelBtn').hidden = false;
+  $('saleDate').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+function cancelEditSale(){
+  state.editing.sale = null;
+  clearSaleForm();
+  $('addSaleBtn').textContent = 'Add sale entry';
+  $('saleCancelBtn').hidden = true;
+}
+window.startEditCost = startEditCost;
+window.startEditProduction = startEditProduction;
+window.startEditSale = startEditSale;
+
 function deleteCostEntry(id){
   if (!confirm('Delete this cost entry?')) return;
   state.costEntries = state.costEntries.filter(e=>e.id!==id);
   saveCosts();
+  if (state.editing.cost===id) cancelEditCost();
   renderMonth(); renderReport(); renderHistory();
 }
 function deleteProductionEntry(id){
   if (!confirm('Delete this production entry?')) return;
   state.productionEntries = state.productionEntries.filter(e=>e.id!==id);
   saveProduction();
+  if (state.editing.production===id) cancelEditProduction();
   renderMonth(); renderReport(); renderHistory();
 }
 function deleteSaleEntry(id){
   if (!confirm('Delete this sale entry?')) return;
   state.salesEntries = state.salesEntries.filter(e=>e.id!==id);
   saveSales();
+  if (state.editing.sale===id) cancelEditSale();
   renderMonth(); renderReport(); renderHistory();
 }
 function toggleMonthDetail(key){
@@ -621,7 +753,10 @@ function monthDetailHtml(key){
         <div class="er-date">${dayLabel(e.dateKey)}</div>
         <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal) &middot; Labor ${fmt(e.labor)} &middot; Water ${fmt(e.water)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
       </div>
-      <button onclick="deleteCostEntry('${e.id}')">Delete</button>
+      <div class="history-actions">
+        <button onclick="startEditCost('${e.id}')">Edit</button>
+        <button onclick="deleteCostEntry('${e.id}')">Delete</button>
+      </div>
     </div>`;
   }).join('') || `<div class="empty-hint">No cost entries.</div>`;
   const prodRows = prods.map(e=>{
@@ -630,7 +765,10 @@ function monthDetailHtml(key){
         <div class="er-date">${dayLabel(e.dateKey)}</div>
         <div>10": ${fmt(e.qty.s10)} &middot; 15": ${fmt(e.qty.s15)} &middot; 20": ${fmt(e.qty.s20)}</div>
       </div>
-      <button onclick="deleteProductionEntry('${e.id}')">Delete</button>
+      <div class="history-actions">
+        <button onclick="startEditProduction('${e.id}')">Edit</button>
+        <button onclick="deleteProductionEntry('${e.id}')">Delete</button>
+      </div>
     </div>`;
   }).join('') || `<div class="empty-hint">No production entries.</div>`;
   const saleRows = sales.map(e=>{
@@ -641,7 +779,10 @@ function monthDetailHtml(key){
         <div class="er-date">${dayLabel(e.dateKey)}</div>
         <div>${parts} &mdash; <strong>${fmt(total)} ETB</strong></div>
       </div>
-      <button onclick="deleteSaleEntry('${e.id}')">Delete</button>
+      <div class="history-actions">
+        <button onclick="startEditSale('${e.id}')">Edit</button>
+        <button onclick="deleteSaleEntry('${e.id}')">Delete</button>
+      </div>
     </div>`;
   }).join('') || `<div class="empty-hint">No sale entries.</div>`;
 
