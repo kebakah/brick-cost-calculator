@@ -132,6 +132,12 @@
   }
   .toast.show{ opacity:1; }
 
+  .confirm-overlay{ position:fixed; inset:0; background:rgba(31,42,36,.45); display:flex; align-items:center; justify-content:center; z-index:1000; padding:24px; }
+  .confirm-overlay[hidden]{ display:none; }
+  .confirm-box{ background:#fff; border-radius:14px; padding:20px; max-width:320px; width:100%; }
+  .confirm-box p{ font-size:14px; margin:0 0 18px; color:var(--ink); line-height:1.4; }
+  .confirm-box .btn-row{ margin:0; }
+
   .tabbar{
     position:fixed; bottom:0; left:0; right:0; max-width:760px; margin:0 auto;
     background:#fff; border-top:1px solid var(--line); display:flex; z-index:50;
@@ -540,6 +546,16 @@ function buildSkeleton(){
       <button class="tab" data-screen="overview">${ICONS.overview}<span>Overview</span></button>
       <button class="tab" data-screen="history">${ICONS.history}<span>History</span></button>
     </div>
+
+    <div class="confirm-overlay" id="confirmOverlay" hidden>
+      <div class="confirm-box">
+        <p id="confirmMessage"></p>
+        <div class="btn-row">
+          <button class="btn-secondary" id="confirmCancelBtn">Cancel</button>
+          <button class="btn-primary" id="confirmOkBtn" style="background:var(--red); color:#fff;">Delete</button>
+        </div>
+      </div>
+    </div>
   `;
 
   $('costDate').value = todayInputValue();
@@ -577,6 +593,25 @@ function buildSkeleton(){
   });
 
   $('exportBtn').addEventListener('click', exportData);
+
+  $('confirmCancelBtn').addEventListener('click', hideConfirm);
+  $('confirmOkBtn').addEventListener('click', ()=>{
+    const cb = _confirmCallback;
+    hideConfirm();
+    if (cb) cb();
+  });
+}
+
+/* ============ CUSTOM CONFIRM (Android WebView doesn't show window.confirm() without extra native wiring, so this replaces it) ============ */
+let _confirmCallback = null;
+function showConfirm(message, onConfirm){
+  $('confirmMessage').textContent = message;
+  _confirmCallback = onConfirm;
+  $('confirmOverlay').hidden = false;
+}
+function hideConfirm(){
+  $('confirmOverlay').hidden = true;
+  _confirmCallback = null;
 }
 
 function showScreen(name){
@@ -779,25 +814,28 @@ window.startEditProduction = startEditProduction;
 window.startEditSale = startEditSale;
 
 function deleteCostEntry(id){
-  if (!confirm('Delete this cost entry?')) return;
-  state.costEntries = state.costEntries.filter(e=>e.id!==id);
-  saveCosts();
-  if (state.editing.cost===id) cancelEditCost();
-  renderMonth(); renderReport(); renderHistory();
+  showConfirm('Delete this cost entry?', ()=>{
+    state.costEntries = state.costEntries.filter(e=>e.id!==id);
+    saveCosts();
+    if (state.editing.cost===id) cancelEditCost();
+    renderMonth(); renderReport(); renderHistory();
+  });
 }
 function deleteProductionEntry(id){
-  if (!confirm('Delete this production entry?')) return;
-  state.productionEntries = state.productionEntries.filter(e=>e.id!==id);
-  saveProduction();
-  if (state.editing.production===id) cancelEditProduction();
-  renderMonth(); renderReport(); renderHistory();
+  showConfirm('Delete this production entry?', ()=>{
+    state.productionEntries = state.productionEntries.filter(e=>e.id!==id);
+    saveProduction();
+    if (state.editing.production===id) cancelEditProduction();
+    renderMonth(); renderReport(); renderHistory();
+  });
 }
 function deleteSaleEntry(id){
-  if (!confirm('Delete this sale entry?')) return;
-  state.salesEntries = state.salesEntries.filter(e=>e.id!==id);
-  saveSales();
-  if (state.editing.sale===id) cancelEditSale();
-  renderMonth(); renderReport(); renderHistory();
+  showConfirm('Delete this sale entry?', ()=>{
+    state.salesEntries = state.salesEntries.filter(e=>e.id!==id);
+    saveSales();
+    if (state.editing.sale===id) cancelEditSale();
+    renderMonth(); renderReport(); renderHistory();
+  });
 }
 function toggleMonthDetail(key){
   state.openMonthKey = state.openMonthKey===key ? null : key;
