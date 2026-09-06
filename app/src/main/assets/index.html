@@ -29,18 +29,39 @@
     font-family:'Work Sans',sans-serif;
     -webkit-font-smoothing:antialiased;
     min-height:100vh;
-    padding-bottom:40px;
+    padding-bottom:78px;
   }
   h1,h2,h3,.serif{ font-family:'Fraunces',serif; }
   #app{ max-width:760px; margin:0 auto; padding:0 16px; }
 
-  .topbar{ padding:22px 4px 6px; }
-  .topbar .name{ font-family:'Fraunces',serif; font-weight:600; font-size:24px; letter-spacing:-0.01em; }
-  .topbar .sub{ font-size:13px; color:var(--ink-soft); margin-top:4px; }
+  .topbar{ padding:20px 4px 16px; display:flex; align-items:center; gap:12px; }
+  .topbar .brand-mark{
+    width:42px; height:42px; border-radius:12px; background:var(--teal); color:#fff;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .topbar .brand-mark svg{ width:24px; height:24px; }
+  .topbar .name{ font-family:'Fraunces',serif; font-weight:600; font-size:20px; letter-spacing:-0.01em; line-height:1.2; }
+  .topbar .sub{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
 
-  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
-  .card h2{ font-size:16px; margin:0 0 4px; }
+  .screen[hidden]{ display:none; }
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:16px;
+    box-shadow:0 1px 2px rgba(31,42,36,.04), 0 4px 14px rgba(31,42,36,.05);
+  }
+  .card h2{ font-size:16px; margin:0 0 4px; display:flex; align-items:center; gap:9px; }
+  .card h2 .card-icon{
+    width:30px; height:30px; border-radius:9px; background:var(--teal-soft); color:var(--teal);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .card h2 .card-icon svg{ width:16px; height:16px; }
   .card .hint{ font-size:12.5px; color:var(--ink-soft); margin:0 0 14px; }
+
+  .stat-row{ display:flex; gap:10px; margin-bottom:18px; }
+  .stat-tile{ flex:1; border-radius:12px; padding:13px 8px; text-align:center; }
+  .stat-tile .stat-val{ font-family:'Fraunces',serif; font-weight:700; font-size:16px; line-height:1.2; }
+  .stat-tile .stat-label{ font-size:10.5px; color:var(--ink-soft); margin-top:4px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+  @media (max-width:360px){ .stat-tile .stat-val{ font-size:14px; } }
 
   .field-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; }
   @media (max-width:520px){ .field-grid{ grid-template-columns:1fr; } }
@@ -110,6 +131,19 @@
     pointer-events:none;
   }
   .toast.show{ opacity:1; }
+
+  .tabbar{
+    position:fixed; bottom:0; left:0; right:0; max-width:760px; margin:0 auto;
+    background:#fff; border-top:1px solid var(--line); display:flex; z-index:50;
+    padding-bottom:env(safe-area-inset-bottom, 0);
+  }
+  .tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:10px 4px 8px; cursor:pointer; color:var(--ink-soft); font-size:11px; font-weight:600; background:none; border:none;
+    font-family:'Work Sans',sans-serif;
+  }
+  .tab svg{ width:21px; height:21px; }
+  .tab.active{ color:var(--teal); }
 </style>
 </head>
 <body>
@@ -132,6 +166,18 @@ const COST_ROWS = [
 ];
 const ETHIOPIAN_MONTHS = ['Meskerem','Tikimt','Hidar','Tahsas','Tir','Yekatit','Megabit','Miazia','Ginbot','Sene','Hamle','Nehase','Pagume'];
 const JD_EPOCH_OFFSET_AMETE_MIHRET = 1723856;
+
+/* ============ ICONS (inline SVG, stroke, currentColor) ============ */
+const ICONS = {
+  brand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h7v6H4zM13 8h7v6h-7zM4 16h16"/></svg>',
+  record: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>',
+  overview: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M3 20h18"/></svg>',
+  history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
+  wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M16 12h2.5"/></svg>',
+  boxes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 21v-9"/></svg>',
+  tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H4a1 1 0 00-1 1v8l10 10 9-9L12 2z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v4M16 3v4"/></svg>',
+};
 
 /* ============ STATE (persisted arrays are the source of truth) ============ */
 const state = {
@@ -310,7 +356,23 @@ function breakdownHtml(costSum, prodSum, salesSum, opts){
     return `<div class="empty-hint">${opts.emptyText || 'No entries yet for this period.'}</div>`;
   }
 
-  return `
+  const statRow = `
+    <div class="stat-row">
+      <div class="stat-tile" style="background:var(--amber-soft);">
+        <div class="stat-val">${fmt(total)}</div>
+        <div class="stat-label">Cost (ETB)</div>
+      </div>
+      <div class="stat-tile" style="background:var(--teal-soft);">
+        <div class="stat-val" style="color:var(--teal);">${fmt(revenue)}</div>
+        <div class="stat-label">Revenue (ETB)</div>
+      </div>
+      <div class="stat-tile" style="background:${profit>=0?'var(--teal-soft)':'var(--red-soft)'};">
+        <div class="stat-val" style="color:${profit>=0?'var(--teal)':'var(--red)'};">${fmt(profit)}</div>
+        <div class="stat-label">Profit (ETB)</div>
+      </div>
+    </div>`;
+
+  return statRow + `
     <div class="table-wrap">
       <table>
         <thead><tr><th>Cost</th><th>Amount</th><th>Quantity</th></tr></thead>
@@ -342,10 +404,6 @@ function breakdownHtml(costSum, prodSum, salesSum, opts){
           <tr class="grand"><td>Total revenue</td><td class="amt">${fmt(salesQtyTotal(salesSum))}</td><td class="amt">${fmt(revenue)} ETB</td></tr>
         </tbody>
       </table>
-    </div>
-    <div class="total-line" style="margin-top:16px;">
-      <span>Profit (revenue &minus; cost)</span>
-      <span class="amt" style="color:${profit>=0?'var(--teal)':'var(--red)'};">${fmt(profit)} ETB</span>
     </div>`;
 }
 
@@ -354,12 +412,16 @@ function buildSkeleton(){
   const app = $('app');
   app.innerHTML = `
     <div class="topbar">
-      <div class="name">Brick Factory Cost Calculator</div>
-      <div class="sub">Log each day's costs and production as they happen. They roll up into monthly totals, and into 3/6/9-month and yearly reports &mdash; all on the Ethiopian calendar.</div>
+      <div class="brand-mark">${ICONS.brand}</div>
+      <div>
+        <div class="name">Brick Factory Tracker</div>
+        <div class="sub">Costs, production &amp; sales &mdash; on the Ethiopian calendar</div>
+      </div>
     </div>
 
+    <div class="screen" id="screen-record">
     <div class="card">
-      <h2>Add a daily cost</h2>
+      <h2><span class="card-icon">${ICONS.wallet}</span>Add a daily cost</h2>
       <p class="hint">Costs for one day. Add a new entry any day costs come in.</p>
       <div class="field">
         <label>Date</label>
@@ -392,7 +454,7 @@ function buildSkeleton(){
     </div>
 
     <div class="card">
-      <h2>Add daily production</h2>
+      <h2><span class="card-icon">${ICONS.boxes}</span>Add daily production</h2>
       <p class="hint">How many of each brick size were made that day.</p>
       <div class="field">
         <label>Date</label>
@@ -412,7 +474,7 @@ function buildSkeleton(){
     </div>
 
     <div class="card">
-      <h2>Add a sale</h2>
+      <h2><span class="card-icon">${ICONS.tag}</span>Add a sale</h2>
       <p class="hint">Enter how many you sold and the price each &mdash; the total is worked out for you.</p>
       <div class="field">
         <label>Date</label>
@@ -433,14 +495,17 @@ function buildSkeleton(){
       </div>
     </div>
 
+    </div>
+
+    <div class="screen" id="screen-overview" hidden>
     <div class="card">
-      <h2 id="monthTitle">This month</h2>
+      <h2><span class="card-icon">${ICONS.calendar}</span><span id="monthTitle">This month</span></h2>
       <p class="hint">Running total for the current Ethiopian calendar month.</p>
       <div id="monthBody"></div>
     </div>
 
     <div class="card">
-      <h2>Reports</h2>
+      <h2><span class="card-icon">${ICONS.overview}</span>Reports</h2>
       <p class="hint">Cumulative totals from the start of the Ethiopian year (Meskerem) through the selected period.</p>
       <select id="reportYearSelect"></select>
       <div class="seg-row">
@@ -451,11 +516,20 @@ function buildSkeleton(){
       </div>
       <div id="reportBody"></div>
     </div>
+    </div>
 
+    <div class="screen" id="screen-history" hidden>
     <div class="card">
-      <h2>Monthly history</h2>
+      <h2><span class="card-icon">${ICONS.history}</span>Monthly history</h2>
       <p class="hint">Every month with data, most recent first. Tap a month to see its daily entries &mdash; Edit any of them to fix a mistake, or Delete to remove it.</p>
       <div id="historyList"></div>
+    </div>
+    </div>
+
+    <div class="tabbar">
+      <button class="tab active" data-screen="record">${ICONS.record}<span>Record</span></button>
+      <button class="tab" data-screen="overview">${ICONS.overview}<span>Overview</span></button>
+      <button class="tab" data-screen="history">${ICONS.history}<span>History</span></button>
     </div>
   `;
 
@@ -488,6 +562,20 @@ function buildSkeleton(){
     state.reportYear = parseInt(e.target.value, 10);
     renderReport();
   });
+
+  document.querySelectorAll('.tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>showScreen(btn.dataset.screen));
+  });
+}
+
+function showScreen(name){
+  ['record','overview','history'].forEach(s=>{
+    $(`screen-${s}`).hidden = (s!==name);
+  });
+  document.querySelectorAll('.tab').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.screen===name);
+  });
+  window.scrollTo(0,0);
 }
 
 /* ============ LIVE TOTAL (targeted, never rebuilds inputs) ============ */
