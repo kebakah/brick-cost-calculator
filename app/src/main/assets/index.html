@@ -69,7 +69,7 @@
   .profit-neg{ color:var(--red); }
   .profit-pos{ color:var(--teal); }
   .table-wrap{ overflow-x:auto; }
-  #resultsEmpty[hidden], #resultsTableWrap[hidden]{ display:none; }
+  [hidden]{ display:none !important; }
 
   .bar-row{ display:flex; align-items:center; gap:10px; font-size:12.5px; margin-bottom:8px; }
   .bar-row .label{ width:78px; flex-shrink:0; color:var(--ink-soft); }
@@ -88,11 +88,13 @@
     padding:13px; font-size:14.5px; font-weight:600; cursor:pointer;
   }
 
-  .history-item{ display:flex; justify-content:space-between; align-items:center; padding:12px 4px; border-bottom:1px solid var(--line); font-size:13.5px; }
+  .history-item{ padding:12px 4px; border-bottom:1px solid var(--line); font-size:13.5px; }
   .history-item:last-child{ border-bottom:none; }
+  .history-item .hi-top{ display:flex; justify-content:space-between; align-items:center; }
   .history-item .hi-date{ color:var(--ink-soft); font-size:12px; }
   .history-item .hi-total{ font-family:'Fraunces',serif; font-weight:600; color:var(--teal); }
   .history-actions button{ background:none; border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-size:12px; cursor:pointer; margin-left:6px; }
+  .history-detail{ margin-top:10px; }
   .empty-hint{ text-align:center; color:var(--ink-soft); font-size:13px; padding:16px 0; }
 
   .toast{
@@ -124,19 +126,73 @@ const COST_FIELDS = [
 
 /* ============ STATE ============ */
 const state = {
-  costs: { komiche:'', cement:'', labor:'', water:'', other:'' },
-  qty: { s10:'', s15:'', s20:'' },
-  weight: { s10:1, s15:1.5, s20:2 },
-  price: { s10:'', s15:'', s20:'' },
-  history: [],
+  entry: {
+    costs: { komiche:'', cement:'', labor:'', water:'', other:'' },
+    qty: { s10:'', s15:'', s20:'' },
+  },
+  settings: {
+    weight: { s10:1, s15:1.5, s20:2 },
+    price: { s10:'', s15:'', s20:'' },
+  },
+  months: {}, // { "YYYY-MM": { costs:{...}, qty:{...}, firstEntryAt, lastUpdatedAt } }
+  openMonth: null, // which past month row is expanded
 };
 
-function loadHistory(){
-  try { state.history = JSON.parse(localStorage.getItem('brickFactoryBatches')||'[]'); }
-  catch(e){ state.history = []; }
+/* ============ ETHIOPIAN CALENDAR ============ */
+// Months add up "for the month" using the Ethiopian calendar, so the
+// running total rolls over at Ethiopian New Year boundaries, not Gregorian ones.
+const JD_EPOCH_OFFSET_AMETE_MIHRET = 1723856;
+const ETHIOPIAN_MONTHS = ['Meskerem','Tikimt','Hidar','Tahsas','Tir','Yekatit','Megabit','Miazia','Ginbot','Sene','Hamle','Nehase','Pagume'];
+
+function gregorianToJdn(year, month, day){
+  const a = Math.floor((14 - month) / 12);
+  const y = year + 4800 - a;
+  const m = month + 12 * a - 3;
+  return day + Math.floor((153 * m + 2) / 5) + 365 * y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
 }
-function saveHistory(){
-  try { localStorage.setItem('brickFactoryBatches', JSON.stringify(state.history)); }
+function jdnToEthiopian(jdn){
+  const r = (jdn - JD_EPOCH_OFFSET_AMETE_MIHRET) % 1461;
+  const n = (r % 365) + 365 * Math.floor(r / 1460);
+  const year = 4 * Math.floor((jdn - JD_EPOCH_OFFSET_AMETE_MIHRET) / 1461) + Math.floor(r / 365) - Math.floor(r / 1460);
+  const month = Math.floor(n / 30) + 1;
+  const day = (n % 30) + 1;
+  return { year, month, day };
+}
+function currentEthiopianDate(){
+  const now = new Date();
+  const jdn = gregorianToJdn(now.getFullYear(), now.getMonth()+1, now.getDate());
+  return jdnToEthiopian(jdn);
+}
+function currentMonthKey(){
+  const e = currentEthiopianDate();
+  return e.year + '-' + String(e.month).padStart(2,'0');
+}
+function monthLabel(key){
+  const parts = key.split('-');
+  const year = parseInt(parts[0],10);
+  const month = parseInt(parts[1],10);
+  return (ETHIOPIAN_MONTHS[month-1] || ('Month '+month)) + ' ' + year + ' E.C.';
+}
+
+function loadSettings(){
+  try {
+    const raw = JSON.parse(localStorage.getItem('brickFactorySettings')||'null');
+    if (raw){
+      state.settings.weight = Object.assign(state.settings.weight, raw.weight||{});
+      state.settings.price = Object.assign(state.settings.price, raw.price||{});
+    }
+  } catch(e){}
+}
+function saveSettings(){
+  try { localStorage.setItem('brickFactorySettings', JSON.stringify(state.settings)); }
+  catch(e){}
+}
+function loadMonths(){
+  try { state.months = JSON.parse(localStorage.getItem('brickFactoryMonths')||'{}'); }
+  catch(e){ state.months = {}; }
+}
+function saveMonths(){
+  try { localStorage.setItem('brickFactoryMonths', JSON.stringify(state.months)); }
   catch(e){}
 }
 
@@ -149,28 +205,47 @@ function showToast(msg){
   t.textContent = msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 1800);
 }
+function emptyBucket(){
+  return {
+    costs: { komiche:0, cement:0, labor:0, water:0, other:0 },
+    qty: { s10:0, s15:0, s20:0 },
+  };
+}
 
-function totalCost(){
-  return COST_FIELDS.reduce((s,f)=>s+num(state.costs[f.key]), 0);
+/* ============ ENTRY (not-yet-added) CALC ============ */
+function entryTotalCost(){
+  return COST_FIELDS.reduce((s,f)=>s+num(state.entry.costs[f.key]), 0);
 }
-function equivalentUnits(){
-  return SIZES.reduce((s,sz)=>s+num(state.qty[sz.key])*num(state.weight[sz.key]), 0);
+function entryTotalQty(){
+  return SIZES.reduce((s,sz)=>s+num(state.entry.qty[sz.key]), 0);
 }
-function baseUnitCost(){
-  const eq = equivalentUnits();
-  return eq>0 ? totalCost()/eq : 0;
+
+/* ============ MONTH BUCKET CALC (works for current or any past month) ============ */
+function bucketFor(key){
+  return state.months[key] || emptyBucket();
 }
-function unitCostFor(szKey){
-  return baseUnitCost() * num(state.weight[szKey]);
+function bucketTotalCost(b){
+  return COST_FIELDS.reduce((s,f)=>s+num(b.costs[f.key]), 0);
 }
-function totalQty(){
-  return SIZES.reduce((s,sz)=>s+num(state.qty[sz.key]), 0);
+function bucketTotalQty(b){
+  return SIZES.reduce((s,sz)=>s+num(b.qty[sz.key]), 0);
 }
-function totalProfit(){
+function bucketEquivUnits(b){
+  return SIZES.reduce((s,sz)=>s+num(b.qty[sz.key])*num(state.settings.weight[sz.key]), 0);
+}
+function bucketBaseUnitCost(b){
+  const eq = bucketEquivUnits(b);
+  return eq>0 ? bucketTotalCost(b)/eq : 0;
+}
+function bucketUnitCostFor(b, szKey){
+  return bucketBaseUnitCost(b) * num(state.settings.weight[szKey]);
+}
+function bucketTotalProfit(b){
   return SIZES.reduce((s,sz)=>{
-    const qty = num(state.qty[sz.key]);
-    const profit = (num(state.price[sz.key]) - unitCostFor(sz.key)) * qty;
-    return s + profit;
+    const qty = num(b.qty[sz.key]);
+    const price = state.settings.price[sz.key];
+    const hasPrice = price!=='' && price!=null;
+    return s + (hasPrice ? (num(price)-bucketUnitCostFor(b, sz.key))*qty : 0);
   }, 0);
 }
 
@@ -180,37 +255,37 @@ function buildSkeleton(){
   app.innerHTML = `
     <div class="topbar">
       <div class="name">Brick Factory Cost Calculator</div>
-      <div class="sub">Enter your manufacturing costs and production quantities to find the true cost and profit per brick.</div>
+      <div class="sub">Add each production run's costs below &mdash; they add up into a running total for the current Ethiopian calendar month, and each new month starts its own total automatically.</div>
     </div>
 
     <div class="card">
-      <h2>Manufacturing costs</h2>
-      <p class="hint">Total cost for this production batch, in ETB.</p>
+      <h2>New entry &mdash; manufacturing costs</h2>
+      <p class="hint">Cost of this production run, in ETB. Cleared once you add it to the month.</p>
       <div class="field-grid">
         ${COST_FIELDS.map(f=>`
           <div class="field">
             <label>${f.label}</label>
-            <input type="number" min="0" inputmode="decimal" id="cost-${f.key}" placeholder="0">
+            <input type="number" min="0" inputmode="decimal" id="entryCost-${f.key}" placeholder="0">
           </div>`).join('')}
       </div>
-      <div class="total-line"><span>Total manufacturing cost</span><span class="amt" id="out-totalCost">0 ETB</span></div>
+      <div class="total-line"><span>Total for this entry</span><span class="amt" id="out-entryTotal">0 ETB</span></div>
     </div>
 
     <div class="card">
-      <h2>Production quantities</h2>
-      <p class="hint">How many of each brick size came out of this batch.</p>
+      <h2>New entry &mdash; production quantities</h2>
+      <p class="hint">How many of each brick size this run produced.</p>
       <div class="field-grid">
         ${SIZES.map(sz=>`
           <div class="field">
             <label>${sz.label}</label>
-            <input type="number" min="0" inputmode="decimal" id="qty-${sz.key}" placeholder="0">
+            <input type="number" min="0" inputmode="decimal" id="entryQty-${sz.key}" placeholder="0">
           </div>`).join('')}
       </div>
       <button class="adv-toggle" id="advToggleBtn">Adjust material-weight ratios &#9662;</button>
       <div class="adv-body" id="advBody" hidden>
         <p class="hint" style="margin-bottom:10px;">
           A bigger brick uses more raw material, so its share of the cost should be bigger too.
-          These weights say how much material each size uses relative to the 10" brick (default 1&nbsp;:&nbsp;1.5&nbsp;:&nbsp;2). Adjust if your mix is different.
+          These weights say how much material each size uses relative to the 10" brick (default 1&nbsp;:&nbsp;1.5&nbsp;:&nbsp;2) and apply to every month.
         </p>
         <div class="field-grid">
           ${SIZES.map(sz=>`
@@ -223,73 +298,90 @@ function buildSkeleton(){
     </div>
 
     <div class="card">
-      <h2>Cost &amp; profit per brick</h2>
-      <p class="hint">Selling price is optional &mdash; add it to see your profit per brick and per size.</p>
-      <div class="empty-hint" id="resultsEmpty">Enter production quantities above to see the cost breakdown.</div>
-      <div class="table-wrap" id="resultsTableWrap" hidden>
-        <table>
-          <thead><tr>
-            <th>Size</th><th>Qty</th><th>Cost / brick</th><th>Total cost</th><th>Selling price</th><th>Profit / brick</th><th>Total profit</th>
-          </tr></thead>
-          <tbody>
-            ${SIZES.map(sz=>`
-              <tr>
-                <td>${sz.label}</td>
-                <td id="out-qty-${sz.key}">0</td>
-                <td id="out-unitCost-${sz.key}">0 ETB</td>
-                <td id="out-lineCost-${sz.key}">0 ETB</td>
-                <td><input type="number" min="0" inputmode="decimal" id="price-${sz.key}" placeholder="&ndash;"></td>
-                <td id="out-profitUnit-${sz.key}">&ndash;</td>
-                <td id="out-profitLine-${sz.key}">&ndash;</td>
-              </tr>`).join('')}
-            <tr class="grand">
-              <td>Total</td>
-              <td id="out-grandQty">0</td>
-              <td></td>
-              <td class="amt" id="out-grandCost">0 ETB</td>
-              <td></td>
-              <td></td>
-              <td class="amt" id="out-grandProfit">0 ETB</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Where the cost goes</h2>
-      <div style="margin-top:10px;">
-        ${COST_FIELDS.map(f=>`
-          <div class="bar-row">
-            <div class="label">${f.label}</div>
-            <div class="bar-track"><div class="bar-fill" id="bar-fill-${f.key}" style="width:0%;"></div></div>
-            <div class="val" id="bar-val-${f.key}">0%</div>
+      <h2>Selling prices</h2>
+      <p class="hint">Per-brick price in ETB &mdash; used to work out profit. Applies to every month until you change it.</p>
+      <div class="field-grid">
+        ${SIZES.map(sz=>`
+          <div class="field">
+            <label>${sz.label}</label>
+            <input type="number" min="0" inputmode="decimal" id="price-${sz.key}" placeholder="&ndash;">
           </div>`).join('')}
       </div>
     </div>
 
     <div class="btn-row">
-      <button class="btn-secondary" id="resetBtn">Reset</button>
-      <button class="btn-primary" id="saveBatchBtn">Save this batch</button>
+      <button class="btn-secondary" id="clearEntryBtn">Clear entry</button>
+      <button class="btn-primary" id="addEntryBtn">Add to this month</button>
     </div>
 
     <div class="card">
-      <h2>Saved batches</h2>
-      <div id="historyList"></div>
+      <h2 id="monthTitle">This month</h2>
+      <p class="hint">Running total for the current calendar month.</p>
+      <div class="empty-hint" id="m-resultsEmpty">No entries added yet this month.</div>
+      <div id="m-resultsBody" hidden>
+        <div class="total-line"><span>Total cost this month</span><span class="amt" id="m-out-totalCost">0 ETB</span></div>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead><tr>
+              <th>Size</th><th>Qty</th><th>Cost / brick</th><th>Total cost</th><th>Profit / brick</th><th>Total profit</th>
+            </tr></thead>
+            <tbody>
+              ${SIZES.map(sz=>`
+                <tr>
+                  <td>${sz.label}</td>
+                  <td id="m-out-qty-${sz.key}">0</td>
+                  <td id="m-out-unitCost-${sz.key}">0 ETB</td>
+                  <td id="m-out-lineCost-${sz.key}">0 ETB</td>
+                  <td id="m-out-profitUnit-${sz.key}">&ndash;</td>
+                  <td id="m-out-profitLine-${sz.key}">&ndash;</td>
+                </tr>`).join('')}
+              <tr class="grand">
+                <td>Total</td>
+                <td id="m-out-grandQty">0</td>
+                <td></td>
+                <td class="amt" id="m-out-grandCost">0 ETB</td>
+                <td></td>
+                <td class="amt" id="m-out-grandProfit">0 ETB</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:16px;">
+          ${COST_FIELDS.map(f=>`
+            <div class="bar-row">
+              <div class="label">${f.label}</div>
+              <div class="bar-track"><div class="bar-fill" id="m-bar-fill-${f.key}" style="width:0%;"></div></div>
+              <div class="val" id="m-bar-val-${f.key}">0%</div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Past months</h2>
+      <div id="pastMonthsList"></div>
     </div>
   `;
 
   COST_FIELDS.forEach(f=>{
-    $(`cost-${f.key}`).addEventListener('input', e=>{ state.costs[f.key] = e.target.value; recompute(); });
+    $(`entryCost-${f.key}`).addEventListener('input', e=>{ state.entry.costs[f.key] = e.target.value; recomputeEntry(); });
   });
   SIZES.forEach(sz=>{
-    $(`qty-${sz.key}`).addEventListener('input', e=>{ state.qty[sz.key] = e.target.value; recompute(); });
-    $(`weight-${sz.key}`).value = state.weight[sz.key];
+    $(`entryQty-${sz.key}`).addEventListener('input', e=>{ state.entry.qty[sz.key] = e.target.value; recomputeEntry(); });
+    $(`weight-${sz.key}`).value = state.settings.weight[sz.key];
     $(`weight-${sz.key}`).addEventListener('input', e=>{
-      state.weight[sz.key] = e.target.value===''? '' : parseFloat(e.target.value);
-      recompute();
+      state.settings.weight[sz.key] = e.target.value===''? '' : parseFloat(e.target.value);
+      saveSettings();
+      recomputeMonth();
+      renderPastMonths();
     });
-    $(`price-${sz.key}`).addEventListener('input', e=>{ state.price[sz.key] = e.target.value; recompute(); });
+    $(`price-${sz.key}`).value = state.settings.price[sz.key];
+    $(`price-${sz.key}`).addEventListener('input', e=>{
+      state.settings.price[sz.key] = e.target.value;
+      saveSettings();
+      recomputeMonth();
+      renderPastMonths();
+    });
   });
 
   $('advToggleBtn').addEventListener('click', ()=>{
@@ -297,137 +389,169 @@ function buildSkeleton(){
     body.hidden = !body.hidden;
     $('advToggleBtn').innerHTML = (body.hidden ? 'Adjust' : 'Hide') + ' material-weight ratios &#9662;';
   });
-  $('resetBtn').addEventListener('click', resetForm);
-  $('saveBatchBtn').addEventListener('click', saveBatch);
+  $('clearEntryBtn').addEventListener('click', clearEntry);
+  $('addEntryBtn').addEventListener('click', addEntryToMonth);
 }
 
-/* ============ TARGETED RECOMPUTE (never rebuilds inputs) ============ */
-function recompute(){
-  $('out-totalCost').textContent = fmt(totalCost()) + ' ETB';
+/* ============ TARGETED RECOMPUTE: entry total (never rebuilds inputs) ============ */
+function recomputeEntry(){
+  $('out-entryTotal').textContent = fmt(entryTotalCost()) + ' ETB';
+}
 
-  const eq = equivalentUnits();
-  $('resultsEmpty').hidden = eq > 0;
-  $('resultsTableWrap').hidden = eq <= 0;
+/* ============ TARGETED RECOMPUTE: this month's cumulative table ============ */
+function recomputeMonth(){
+  const key = currentMonthKey();
+  $('monthTitle').textContent = 'This month — ' + monthLabel(key);
+  const b = bucketFor(key);
+  const hasData = bucketTotalQty(b) > 0;
 
-  if (eq > 0){
-    SIZES.forEach(sz=>{
-      const qty = num(state.qty[sz.key]);
-      const unitCost = unitCostFor(sz.key);
-      const lineCost = unitCost*qty;
-      const price = state.price[sz.key];
-      const hasPrice = price!=='' && price!=null;
-      const profitUnit = hasPrice ? num(price)-unitCost : null;
-      const profitLine = hasPrice ? profitUnit*qty : null;
+  $('m-resultsEmpty').hidden = hasData;
+  $('m-resultsBody').hidden = !hasData;
+  if (!hasData) return;
 
-      $(`out-qty-${sz.key}`).textContent = fmt(qty);
-      $(`out-unitCost-${sz.key}`).textContent = fmt(unitCost) + ' ETB';
-      $(`out-lineCost-${sz.key}`).textContent = fmt(lineCost) + ' ETB';
+  $('m-out-totalCost').textContent = fmt(bucketTotalCost(b)) + ' ETB';
 
-      const profitUnitEl = $(`out-profitUnit-${sz.key}`);
-      const profitLineEl = $(`out-profitLine-${sz.key}`);
-      profitUnitEl.textContent = hasPrice ? fmt(profitUnit)+' ETB' : '–';
-      profitUnitEl.className = hasPrice ? (profitUnit>=0?'profit-pos':'profit-neg') : '';
-      profitLineEl.textContent = hasPrice ? fmt(profitLine)+' ETB' : '–';
-      profitLineEl.className = hasPrice ? (profitLine>=0?'profit-pos':'profit-neg') : '';
-    });
-    $('out-grandQty').textContent = fmt(totalQty());
-    $('out-grandCost').textContent = fmt(totalCost()) + ' ETB';
-    $('out-grandProfit').textContent = fmt(totalProfit()) + ' ETB';
-  }
+  SIZES.forEach(sz=>{
+    const qty = num(b.qty[sz.key]);
+    const unitCost = bucketUnitCostFor(b, sz.key);
+    const lineCost = unitCost*qty;
+    const price = state.settings.price[sz.key];
+    const hasPrice = price!=='' && price!=null;
+    const profitUnit = hasPrice ? num(price)-unitCost : null;
+    const profitLine = hasPrice ? profitUnit*qty : null;
 
-  const total = totalCost();
+    $(`m-out-qty-${sz.key}`).textContent = fmt(qty);
+    $(`m-out-unitCost-${sz.key}`).textContent = fmt(unitCost) + ' ETB';
+    $(`m-out-lineCost-${sz.key}`).textContent = fmt(lineCost) + ' ETB';
+
+    const profitUnitEl = $(`m-out-profitUnit-${sz.key}`);
+    const profitLineEl = $(`m-out-profitLine-${sz.key}`);
+    profitUnitEl.textContent = hasPrice ? fmt(profitUnit)+' ETB' : '–';
+    profitUnitEl.className = hasPrice ? (profitUnit>=0?'profit-pos':'profit-neg') : '';
+    profitLineEl.textContent = hasPrice ? fmt(profitLine)+' ETB' : '–';
+    profitLineEl.className = hasPrice ? (profitLine>=0?'profit-pos':'profit-neg') : '';
+  });
+  $('m-out-grandQty').textContent = fmt(bucketTotalQty(b));
+  $('m-out-grandCost').textContent = fmt(bucketTotalCost(b)) + ' ETB';
+  $('m-out-grandProfit').textContent = fmt(bucketTotalProfit(b)) + ' ETB';
+
+  const total = bucketTotalCost(b);
   COST_FIELDS.forEach(f=>{
-    const v = num(state.costs[f.key]);
+    const v = num(b.costs[f.key]);
     const pct = total>0 ? (v/total*100) : 0;
-    $(`bar-fill-${f.key}`).style.width = pct + '%';
-    $(`bar-val-${f.key}`).textContent = fmt(pct) + '%';
+    $(`m-bar-fill-${f.key}`).style.width = pct + '%';
+    $(`m-bar-val-${f.key}`).textContent = fmt(pct) + '%';
   });
 }
 
 /* ============ ACTIONS ============ */
-function resetForm(){
-  if (!confirm('Clear all costs, quantities and prices?')) return;
-  state.costs = { komiche:'', cement:'', labor:'', water:'', other:'' };
-  state.qty = { s10:'', s15:'', s20:'' };
-  state.price = { s10:'', s15:'', s20:'' };
-  state.weight = { s10:1, s15:1.5, s20:2 };
-  applyStateToInputs();
-  recompute();
+function clearEntry(){
+  state.entry.costs = { komiche:'', cement:'', labor:'', water:'', other:'' };
+  state.entry.qty = { s10:'', s15:'', s20:'' };
+  applyEntryToInputs();
+  recomputeEntry();
+}
+function applyEntryToInputs(){
+  COST_FIELDS.forEach(f=>{ $(`entryCost-${f.key}`).value = state.entry.costs[f.key]; });
+  SIZES.forEach(sz=>{ $(`entryQty-${sz.key}`).value = state.entry.qty[sz.key]; });
 }
 
-function applyStateToInputs(){
-  COST_FIELDS.forEach(f=>{ $(`cost-${f.key}`).value = state.costs[f.key]; });
-  SIZES.forEach(sz=>{
-    $(`qty-${sz.key}`).value = state.qty[sz.key];
-    $(`weight-${sz.key}`).value = state.weight[sz.key];
-    $(`price-${sz.key}`).value = state.price[sz.key];
-  });
+function addEntryToMonth(){
+  if (entryTotalCost()<=0 || entryTotalQty()<=0){ showToast('Add costs and quantities first'); return; }
+  const key = currentMonthKey();
+  const bucket = state.months[key] || Object.assign(emptyBucket(), { firstEntryAt: Date.now() });
+  COST_FIELDS.forEach(f=>{ bucket.costs[f.key] = num(bucket.costs[f.key]) + num(state.entry.costs[f.key]); });
+  SIZES.forEach(sz=>{ bucket.qty[sz.key] = num(bucket.qty[sz.key]) + num(state.entry.qty[sz.key]); });
+  bucket.lastUpdatedAt = Date.now();
+  state.months[key] = bucket;
+  saveMonths();
+
+  clearEntry();
+  recomputeMonth();
+  showToast('Added to ' + monthLabel(key));
 }
 
-function saveBatch(){
-  if (totalCost()<=0 || totalQty()<=0){ showToast('Add costs and quantities first'); return; }
-  const batch = {
-    id: Date.now().toString(36)+Math.random().toString(36).slice(2,7),
-    savedAt: Date.now(),
-    costs: {...state.costs},
-    qty: {...state.qty},
-    weight: {...state.weight},
-    price: {...state.price},
-    totalCost: totalCost(),
-    totalQty: totalQty(),
-    totalProfit: totalProfit(),
-  };
-  state.history.push(batch);
-  saveHistory();
-  showToast('Batch saved');
-  renderHistory();
+function deleteMonth(key){
+  if (!confirm('Delete all data for ' + monthLabel(key) + '?')) return;
+  delete state.months[key];
+  saveMonths();
+  renderPastMonths();
 }
-function loadBatch(id){
-  const b = state.history.find(x=>x.id===id);
-  if (!b) return;
-  state.costs = {...b.costs};
-  state.qty = {...b.qty};
-  state.weight = {...b.weight};
-  state.price = {...b.price};
-  applyStateToInputs();
-  recompute();
-  showToast('Batch loaded');
-  window.scrollTo(0,0);
+function toggleMonthDetail(key){
+  state.openMonth = state.openMonth===key ? null : key;
+  renderPastMonths();
 }
-function deleteBatch(id){
-  if (!confirm('Delete this saved batch?')) return;
-  state.history = state.history.filter(x=>x.id!==id);
-  saveHistory();
-  renderHistory();
-}
-window.loadBatch = loadBatch;
-window.deleteBatch = deleteBatch;
+window.deleteMonth = deleteMonth;
+window.toggleMonthDetail = toggleMonthDetail;
 
-function renderHistory(){
-  const el = $('historyList');
-  if (state.history.length===0){
-    el.innerHTML = `<div class="empty-hint">No batches saved yet.</div>`;
+function monthDetailHtml(key){
+  const b = bucketFor(key);
+  return `
+    <div class="history-detail">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Size</th><th>Qty</th><th>Cost / brick</th><th>Total cost</th><th>Profit / brick</th><th>Total profit</th></tr></thead>
+          <tbody>
+            ${SIZES.map(sz=>{
+              const qty = num(b.qty[sz.key]);
+              const unitCost = bucketUnitCostFor(b, sz.key);
+              const price = state.settings.price[sz.key];
+              const hasPrice = price!=='' && price!=null;
+              const profitUnit = hasPrice ? num(price)-unitCost : null;
+              return `<tr>
+                <td>${sz.label}</td>
+                <td>${fmt(qty)}</td>
+                <td>${fmt(unitCost)} ETB</td>
+                <td>${fmt(unitCost*qty)} ETB</td>
+                <td class="${hasPrice ? (profitUnit>=0?'profit-pos':'profit-neg') : ''}">${hasPrice ? fmt(profitUnit)+' ETB' : '&ndash;'}</td>
+                <td class="${hasPrice ? (profitUnit>=0?'profit-pos':'profit-neg') : ''}">${hasPrice ? fmt(profitUnit*qty)+' ETB' : '&ndash;'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderPastMonths(){
+  const el = $('pastMonthsList');
+  const key = currentMonthKey();
+  const keys = Object.keys(state.months).filter(k=>k!==key).sort().reverse();
+  if (keys.length===0){
+    el.innerHTML = `<div class="empty-hint">No past months yet &mdash; they'll show up here once a new month starts.</div>`;
     return;
   }
-  el.innerHTML = state.history.slice().reverse().map(b=>`
-    <div class="history-item">
-      <div>
-        <div>${fmt(b.totalCost)} ETB &middot; ${fmt(b.totalQty)} bricks</div>
-        <div class="hi-date">${new Date(b.savedAt).toLocaleString()}</div>
-      </div>
-      <div class="history-actions">
-        <button onclick="loadBatch('${b.id}')">Load</button>
-        <button onclick="deleteBatch('${b.id}')">Delete</button>
-      </div>
-    </div>`).join('');
+  el.innerHTML = keys.map(k=>{
+    const b = bucketFor(k);
+    const open = state.openMonth===k;
+    return `
+      <div class="history-item">
+        <div class="hi-top">
+          <div>
+            <div>${monthLabel(k)}</div>
+            <div class="hi-date">${fmt(bucketTotalQty(b))} bricks</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="hi-total">${fmt(bucketTotalCost(b))} ETB</div>
+          </div>
+          <div class="history-actions">
+            <button onclick="toggleMonthDetail('${k}')">${open ? 'Hide' : 'View'}</button>
+            <button onclick="deleteMonth('${k}')">Delete</button>
+          </div>
+        </div>
+        ${open ? monthDetailHtml(k) : ''}
+      </div>`;
+  }).join('');
 }
 
 /* ============ BOOT ============ */
 (function boot(){
-  loadHistory();
+  loadSettings();
+  loadMonths();
   buildSkeleton();
-  recompute();
-  renderHistory();
+  recomputeEntry();
+  recomputeMonth();
+  renderPastMonths();
 })();
 </script>
 </body>
