@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.BrickCost" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/teal</item>
+        <item name="colorPrimaryDark">@color/ink</item>
+        <item name="colorAccent">@color/gold</item>
+        <item name="android:windowBackground">@color/cream</item>
+    </style>
+</resources>

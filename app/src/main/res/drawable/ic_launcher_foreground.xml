@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/vector"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- brick body -->
+    <path
+        android:fillColor="#FBF7F0"
+        android:pathData="M28,40 h52 a4,4 0 0 1 4,4 v20 a4,4 0 0 1 -4,4 h-52 a4,4 0 0 1 -4,-4 v-20 a4,4 0 0 1 4,-4 z" />
+    <!-- mortar lines -->
+    <path
+        android:strokeColor="#1B6B5A"
+        android:strokeWidth="3"
+        android:pathData="M24,54 h60" />
+    <path
+        android:strokeColor="#1B6B5A"
+        android:strokeWidth="3"
+        android:pathData="M54,40 v14" />
+    <path
+        android:strokeColor="#1B6B5A"
+        android:strokeWidth="3"
+        android:pathData="M40,54 v14" />
+    <path
+        android:strokeColor="#1B6B5A"
+        android:strokeWidth="3"
+        android:pathData="M68,54 v14" />
+</vector>
