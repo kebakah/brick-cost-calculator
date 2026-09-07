@@ -167,6 +167,7 @@ const COST_ROWS = [
   { key:'komicheCost', label:'Komiche' },
   { key:'cementCost', label:'Cement' },
   { key:'labor', label:'Labor cost' },
+  { key:'electric', label:'Electric' },
   { key:'water', label:'Water' },
   { key:'other', label:'Other' },
 ];
@@ -296,15 +297,15 @@ function salesInYearRange(year, monthMin, monthMax){
   });
 }
 function sumCosts(entries){
-  const s = { komicheCost:0, komicheCars:0, cementCost:0, cementKuntal:0, labor:0, water:0, other:0 };
+  const s = { komicheCost:0, komicheCars:0, cementCost:0, cementKuntal:0, labor:0, electric:0, water:0, other:0 };
   entries.forEach(e=>{
     s.komicheCost += num(e.komicheCost); s.komicheCars += num(e.komicheCars);
     s.cementCost += num(e.cementCost); s.cementKuntal += num(e.cementKuntal);
-    s.labor += num(e.labor); s.water += num(e.water); s.other += num(e.other);
+    s.labor += num(e.labor); s.electric += num(e.electric); s.water += num(e.water); s.other += num(e.other);
   });
   return s;
 }
-function costTotal(s){ return s.komicheCost + s.cementCost + s.labor + s.water + s.other; }
+function costTotal(s){ return s.komicheCost + s.cementCost + s.labor + s.electric + s.water + s.other; }
 function sumProduction(entries){
   const s = { s10:0, s15:0, s20:0 };
   entries.forEach(e=>{ SIZES.forEach(sz=>{ s[sz.key] += num(e.qty[sz.key]); }); });
@@ -387,6 +388,7 @@ function breakdownHtml(costSum, prodSum, salesSum, opts){
           <tr><td>Komiche</td><td>${fmt(costSum.komicheCost)} ETB</td><td>${fmt(costSum.komicheCars)} cars</td></tr>
           <tr><td>Cement</td><td>${fmt(costSum.cementCost)} ETB</td><td>${fmt(costSum.cementKuntal)} kuntal</td></tr>
           <tr><td>Labor</td><td>${fmt(costSum.labor)} ETB</td><td></td></tr>
+          <tr><td>Electric</td><td>${fmt(costSum.electric)} ETB</td><td></td></tr>
           <tr><td>Water</td><td>${fmt(costSum.water)} ETB</td><td></td></tr>
           <tr><td>Other</td><td>${fmt(costSum.other)} ETB</td><td></td></tr>
           <tr class="grand"><td>Total cost</td><td class="amt">${fmt(total)} ETB</td><td></td></tr>
@@ -456,6 +458,7 @@ function buildSkeleton(){
       </div>
       <div class="field-grid">
         <div class="field"><label>Labor cost</label><input type="number" min="0" inputmode="decimal" id="laborCost" placeholder="0"></div>
+        <div class="field"><label>Electric</label><input type="number" min="0" inputmode="decimal" id="electricCost" placeholder="0"></div>
         <div class="field"><label>Water</label><input type="number" min="0" inputmode="decimal" id="waterCost" placeholder="0"></div>
         <div class="field"><label>Other</label><input type="number" min="0" inputmode="decimal" id="otherCost" placeholder="0"></div>
       </div>
@@ -518,6 +521,12 @@ function buildSkeleton(){
     </div>
 
     <div class="card">
+      <h2><span class="card-icon">${ICONS.boxes}</span>Stock on hand</h2>
+      <p class="hint">Bricks produced so far, minus bricks sold so far &mdash; how many of each size you have left.</p>
+      <div id="stockBody"></div>
+    </div>
+
+    <div class="card">
       <h2><span class="card-icon">${ICONS.overview}</span>Reports</h2>
       <p class="hint">Cumulative totals from the start of the Ethiopian year (Meskerem) through the selected period.</p>
       <select id="reportYearSelect"></select>
@@ -568,7 +577,7 @@ function buildSkeleton(){
   $('prodDate').value = todayInputValue();
   $('saleDate').value = todayInputValue();
 
-  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{
+  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','electricCost','waterCost','otherCost'].forEach(id=>{
     $(id).addEventListener('input', updateCostEntryTotal);
   });
   $('addCostBtn').addEventListener('click', addCostEntry);
@@ -636,7 +645,7 @@ function updateCostEntryTotal(){
   const cementCost = num($('cementPrice').value) * num($('cementKuntal').value);
   $('out-komicheSubtotal').textContent = fmt(komicheCost) + ' ETB';
   $('out-cementSubtotal').textContent = fmt(cementCost) + ' ETB';
-  const total = komicheCost + cementCost + num($('laborCost').value) + num($('waterCost').value) + num($('otherCost').value);
+  const total = komicheCost + cementCost + num($('laborCost').value) + num($('electricCost').value) + num($('waterCost').value) + num($('otherCost').value);
   $('out-costEntryTotal').textContent = fmt(total) + ' ETB';
 }
 function updateSaleEntryTotal(){
@@ -647,7 +656,7 @@ function updateSaleEntryTotal(){
 
 /* ============ ACTIONS ============ */
 function clearCostForm(){
-  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
+  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','electricCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
   $('costDate').value = todayInputValue();
   updateCostEntryTotal();
 }
@@ -670,15 +679,16 @@ function addCostEntry(){
   const cementKuntal = num($('cementKuntal').value);
   const cementCost = cementPrice * cementKuntal;
   const labor = num($('laborCost').value);
+  const electric = num($('electricCost').value);
   const water = num($('waterCost').value);
   const other = num($('otherCost').value);
-  const total = komicheCost + cementCost + labor + water + other;
+  const total = komicheCost + cementCost + labor + electric + water + other;
   if (total<=0){ showToast('Enter at least one cost amount'); return; }
 
   const eth = ethFromDateStr(dateStr);
   const dateKey = ethDateKey(eth), monthKey = ethMonthKey(eth);
   const wasEditing = state.editing.cost;
-  const fields = { dateKey, monthKey, komichePrice, komicheCars, komicheCost, cementPrice, cementKuntal, cementCost, labor, water, other };
+  const fields = { dateKey, monthKey, komichePrice, komicheCars, komicheCost, cementPrice, cementKuntal, cementCost, labor, electric, water, other };
 
   if (wasEditing){
     const e = state.costEntries.find(x=>x.id===wasEditing);
@@ -696,6 +706,7 @@ function addCostEntry(){
   renderMonth();
   renderReport();
   renderHistory();
+  renderStock();
 }
 
 function addProductionEntry(){
@@ -725,6 +736,7 @@ function addProductionEntry(){
   renderMonth();
   renderReport();
   renderHistory();
+  renderStock();
 }
 
 function addSaleEntry(){
@@ -759,6 +771,7 @@ function addSaleEntry(){
   renderMonth();
   renderReport();
   renderHistory();
+  renderStock();
 }
 
 function startEditCost(id){
@@ -774,6 +787,7 @@ function startEditCost(id){
   $('cementPrice').value = cementPrice;
   $('cementKuntal').value = e.cementKuntal || '';
   $('laborCost').value = e.labor || '';
+  $('electricCost').value = e.electric || '';
   $('waterCost').value = e.water || '';
   $('otherCost').value = e.other || '';
   updateCostEntryTotal();
@@ -836,6 +850,7 @@ function deleteCostEntry(id){
     saveCosts();
     if (state.editing.cost===id) cancelEditCost();
     renderMonth(); renderReport(); renderHistory();
+    renderStock();
   });
 }
 function deleteProductionEntry(id){
@@ -844,6 +859,7 @@ function deleteProductionEntry(id){
     saveProduction();
     if (state.editing.production===id) cancelEditProduction();
     renderMonth(); renderReport(); renderHistory();
+    renderStock();
   });
 }
 function deleteSaleEntry(id){
@@ -852,6 +868,7 @@ function deleteSaleEntry(id){
     saveSales();
     if (state.editing.sale===id) cancelEditSale();
     renderMonth(); renderReport(); renderHistory();
+    renderStock();
   });
 }
 function toggleMonthDetail(key){
@@ -871,13 +888,13 @@ function rowXml(cells){ return `<Row>${cells.join('')}</Row>`; }
 
 function buildExportXml(){
   const costs = state.costEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
-  const costsHeader = rowXml(['Date','Komiche Price/Car','Komiche Cars','Komiche Cost','Cement Price/Kuntal','Cement Kuntal','Cement Cost','Labor','Water','Other','Total'].map(cellStr));
+  const costsHeader = rowXml(['Date','Komiche Price/Car','Komiche Cars','Komiche Cost','Cement Price/Kuntal','Cement Kuntal','Cement Cost','Labor','Electric','Water','Other','Total'].map(cellStr));
   const costsRows = costs.map(e=>rowXml([
     cellStr(dayLabel(e.dateKey)),
     cellNum(unitPriceOf(e.komichePrice, e.komicheCost, e.komicheCars)), cellNum(e.komicheCars), cellNum(e.komicheCost),
     cellNum(unitPriceOf(e.cementPrice, e.cementCost, e.cementKuntal)), cellNum(e.cementKuntal), cellNum(e.cementCost),
-    cellNum(e.labor), cellNum(e.water), cellNum(e.other),
-    cellNum(e.komicheCost+e.cementCost+e.labor+e.water+e.other),
+    cellNum(e.labor), cellNum(e.electric), cellNum(e.water), cellNum(e.other),
+    cellNum(num(e.komicheCost)+num(e.cementCost)+num(e.labor)+num(e.electric)+num(e.water)+num(e.other)),
   ])).join('');
 
   const prods = state.productionEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
@@ -932,6 +949,39 @@ function renderMonth(){
   $('monthBody').innerHTML = breakdownHtml(costSum, prodSum, saleSum, { emptyText:'No entries added yet this month.' });
 }
 
+/* ============ RENDER: STOCK ON HAND (all-time produced minus all-time sold) ============ */
+function renderStock(){
+  const produced = sumProduction(state.productionEntries);
+  const sold = sumSales(state.salesEntries);
+  const totalProduced = prodTotal(produced);
+  const totalSold = salesQtyTotal(sold);
+
+  if (totalProduced<=0 && totalSold<=0){
+    $('stockBody').innerHTML = `<div class="empty-hint">No production or sales recorded yet.</div>`;
+    return;
+  }
+
+  let remainingTotal = 0;
+  const rows = SIZES.map(sz=>{
+    const p = produced[sz.key];
+    const s = sold[sz.key].qty;
+    const remaining = p - s;
+    remainingTotal += remaining;
+    return `<tr><td>${sz.label}</td><td>${fmt(p)}</td><td>${fmt(s)}</td><td class="amt" style="color:${remaining>=0?'var(--teal)':'var(--red)'};">${fmt(remaining)}</td></tr>`;
+  }).join('');
+
+  $('stockBody').innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Size</th><th>Produced</th><th>Sold</th><th>In stock</th></tr></thead>
+        <tbody>
+          ${rows}
+          <tr class="grand"><td>Total</td><td>${fmt(totalProduced)}</td><td>${fmt(totalSold)}</td><td class="amt" style="color:${remainingTotal>=0?'var(--teal)':'var(--red)'};">${fmt(remainingTotal)}</td></tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
 /* ============ RENDER: REPORTS ============ */
 function renderReport(){
   const years = allYears();
@@ -963,13 +1013,13 @@ function monthDetailHtml(key){
   const prods = state.productionEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const sales = state.salesEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const costRows = costs.map(e=>{
-    const total = e.komicheCost+e.cementCost+e.labor+e.water+e.other;
+    const total = num(e.komicheCost)+num(e.cementCost)+num(e.labor)+num(e.electric)+num(e.water)+num(e.other);
     const komichePrice = unitPriceOf(e.komichePrice, e.komicheCost, e.komicheCars);
     const cementPrice = unitPriceOf(e.cementPrice, e.cementCost, e.cementKuntal);
     return `<div class="entry-row">
       <div class="er-main">
         <div class="er-date">${dayLabel(e.dateKey)}</div>
-        <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars @ ${fmt(komichePrice)}) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal @ ${fmt(cementPrice)}) &middot; Labor ${fmt(e.labor)} &middot; Water ${fmt(e.water)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
+        <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars @ ${fmt(komichePrice)}) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal @ ${fmt(cementPrice)}) &middot; Labor ${fmt(e.labor)} &middot; Electric ${fmt(e.electric)} &middot; Water ${fmt(e.water)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
       </div>
       <div class="history-actions">
         <button onclick="startEditCost('${e.id}')">Edit</button>
@@ -1054,6 +1104,7 @@ function renderHistory(){
   renderMonth();
   renderReport();
   renderHistory();
+  renderStock();
 })();
 </script>
 </body>
