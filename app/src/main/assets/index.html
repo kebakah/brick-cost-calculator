@@ -186,6 +186,7 @@ const ICONS = {
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H4a1 1 0 00-1 1v8l10 10 9-9L12 2z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v4M16 3v4"/></svg>',
   export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4"/></svg>',
+  backup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 01-1-7.87A5 5 0 0116 8a4.5 4.5 0 011 8.9"/><path d="M12 20v-6M9.5 16.5L12 14l2.5 2.5"/></svg>',
 };
 
 /* ============ STATE (persisted arrays are the source of truth) ============ */
@@ -557,6 +558,15 @@ function buildSkeleton(){
         <button class="btn-primary" id="exportBtn">Export all data</button>
       </div>
     </div>
+
+    <div class="card">
+      <h2><span class="card-icon">${ICONS.backup}</span>Backup &amp; Restore</h2>
+      <p class="hint">If you lose or replace this phone, your data goes with it unless you back it up. Save a backup file to Google Drive or email it to yourself, then restore it on the new phone.</p>
+      <div class="btn-row" style="margin:0;">
+        <button class="btn-secondary" id="restoreBtn">Restore from backup</button>
+        <button class="btn-primary" id="backupBtn">Back up data</button>
+      </div>
+    </div>
     </div>
 
     <div class="tabbar">
@@ -611,6 +621,8 @@ function buildSkeleton(){
   });
 
   $('exportBtn').addEventListener('click', exportData);
+  $('backupBtn').addEventListener('click', backupData);
+  $('restoreBtn').addEventListener('click', restoreData);
 
   $('confirmCancelBtn').addEventListener('click', hideConfirm);
   $('confirmOkBtn').addEventListener('click', ()=>{
@@ -984,11 +996,70 @@ function exportData(){
   const xml = buildExportXml();
   const filename = 'brick-factory-export-' + todayInputValue() + '.xls';
   if (window.AndroidExport && window.AndroidExport.shareFile){
-    window.AndroidExport.shareFile(filename, xml);
+    window.AndroidExport.shareFile(filename, xml, 'application/vnd.ms-excel');
   } else {
     showToast('Export is only available in the app');
   }
 }
+
+/* ============ BACKUP / RESTORE (so data survives losing or replacing the phone) ============ */
+function backupData(){
+  const totalEntries = state.costEntries.length + state.productionEntries.length + state.salesEntries.length;
+  if (totalEntries===0){ showToast('No data to back up yet'); return; }
+  const backup = {
+    app: 'brick-factory-tracker',
+    version: 1,
+    exportedAt: Date.now(),
+    costEntries: state.costEntries,
+    productionEntries: state.productionEntries,
+    salesEntries: state.salesEntries,
+  };
+  const filename = 'brick-factory-backup-' + todayInputValue() + '.json';
+  if (window.AndroidExport && window.AndroidExport.shareFile){
+    window.AndroidExport.shareFile(filename, JSON.stringify(backup), 'application/json');
+    showToast('Save this file somewhere safe, e.g. Google Drive');
+  } else {
+    showToast('Backup is only available in the app');
+  }
+}
+
+function restoreData(){
+  if (window.AndroidExport && window.AndroidExport.pickBackupFile){
+    window.AndroidExport.pickBackupFile();
+  } else {
+    showToast('Restore is only available in the app');
+  }
+}
+
+function receiveImportedBackup(content){
+  let backup;
+  try { backup = JSON.parse(content); }
+  catch(e){ showToast('That file is not a valid backup'); return; }
+
+  if (!backup || !Array.isArray(backup.costEntries) || !Array.isArray(backup.productionEntries) || !Array.isArray(backup.salesEntries)){
+    showToast('That file is not a valid backup');
+    return;
+  }
+
+  showConfirm('Replace all current data on this phone with this backup? This cannot be undone.', ()=>{
+    state.costEntries = backup.costEntries;
+    state.productionEntries = backup.productionEntries;
+    state.salesEntries = backup.salesEntries;
+    saveCosts();
+    saveProduction();
+    saveSales();
+    cancelEditCost();
+    cancelEditProduction();
+    cancelEditSale();
+    state.openMonthKey = null;
+    renderMonth();
+    renderReport();
+    renderHistory();
+    renderStock();
+    showToast('Backup restored');
+  });
+}
+window.receiveImportedBackup = receiveImportedBackup;
 
 /* ============ RENDER: THIS MONTH ============ */
 function renderMonth(){
