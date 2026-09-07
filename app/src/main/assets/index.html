@@ -893,7 +893,8 @@ function rowXml(cells){ return `<Row>${cells.join('')}</Row>`; }
 
 function buildSummaryRows(){
   const monthKeys = allMonthKeys().slice().sort(); // chronological, oldest first, for a report
-  let grandCost = 0, grandRevenue = 0;
+  let grandRevenue = 0;
+  const grandCost = { komicheCost:0, cementCost:0, labor:0, electric:0, water:0, rent:0, other:0 };
   const grandQty = { s10:0, s15:0, s20:0 };
 
   const rows = monthKeys.map(k=>{
@@ -901,11 +902,13 @@ function buildSummaryRows(){
     const saleSum = sumSales(state.salesEntries.filter(e=>e.monthKey===k));
     const cost = costTotal(costSum);
     const revenue = salesRevenueTotal(saleSum);
-    grandCost += cost;
+    Object.keys(grandCost).forEach(key=>{ grandCost[key] += costSum[key]; });
     grandRevenue += revenue;
     SIZES.forEach(sz=>{ grandQty[sz.key] += saleSum[sz.key].qty; });
     return rowXml([
       cellStr(monthLabel(k)),
+      cellNum(costSum.komicheCost), cellNum(costSum.cementCost), cellNum(costSum.labor),
+      cellNum(costSum.electric), cellNum(costSum.water), cellNum(costSum.rent), cellNum(costSum.other),
       cellNum(cost),
       cellNum(saleSum.s10.qty), cellNum(saleSum.s15.qty), cellNum(saleSum.s20.qty), cellNum(salesQtyTotal(saleSum)),
       cellNum(revenue),
@@ -913,20 +916,26 @@ function buildSummaryRows(){
     ]);
   }).join('');
 
+  const grandCostTotal = costTotal(grandCost);
   const grandQtyTotal = grandQty.s10 + grandQty.s15 + grandQty.s20;
   const grandRow = rowXml([
     cellStr('TOTAL (all time)'),
-    cellNum(grandCost),
+    cellNum(grandCost.komicheCost), cellNum(grandCost.cementCost), cellNum(grandCost.labor),
+    cellNum(grandCost.electric), cellNum(grandCost.water), cellNum(grandCost.rent), cellNum(grandCost.other),
+    cellNum(grandCostTotal),
     cellNum(grandQty.s10), cellNum(grandQty.s15), cellNum(grandQty.s20), cellNum(grandQtyTotal),
     cellNum(grandRevenue),
-    cellNum(grandRevenue - grandCost),
+    cellNum(grandRevenue - grandCostTotal),
   ]);
 
   return rows + grandRow;
 }
 
 function buildExportXml(){
-  const summaryHeader = rowXml(['Month','Total Cost (ETB)','10" Sold','15" Sold','20" Sold','Total Sold','Total Revenue (ETB)','Profit / Loss (ETB)'].map(cellStr));
+  const summaryHeader = rowXml([
+    'Month','Total Komiche','Total Cement','Total Labor','Total Electric','Total Water','House Rent','Other',
+    'Total Cost','10" Sold','15" Sold','20" Sold','Total Sold','Total Revenue','Profit / Loss',
+  ].map(cellStr));
   const summaryRows = buildSummaryRows();
 
   const costs = state.costEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
