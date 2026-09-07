@@ -437,15 +437,21 @@ function buildSkeleton(){
       <div class="subgroup">
         <div class="subgroup-title">Komiche</div>
         <div class="field-grid">
-          <div class="field"><label>Cost (ETB)</label><input type="number" min="0" inputmode="decimal" id="komicheCost" placeholder="0"></div>
+          <div class="field"><label>Price per car (ETB)</label><input type="number" min="0" inputmode="decimal" id="komichePrice" placeholder="0"></div>
           <div class="field"><label>Cars</label><input type="number" min="0" inputmode="decimal" id="komicheCars" placeholder="0"></div>
+        </div>
+        <div class="total-line" style="border-top:none; padding-top:8px; margin-top:0; font-size:12.5px;">
+          <span>Komiche total</span><span id="out-komicheSubtotal">0 ETB</span>
         </div>
       </div>
       <div class="subgroup">
         <div class="subgroup-title">Cement</div>
         <div class="field-grid">
-          <div class="field"><label>Cost (ETB)</label><input type="number" min="0" inputmode="decimal" id="cementCost" placeholder="0"></div>
+          <div class="field"><label>Price per kuntal (ETB)</label><input type="number" min="0" inputmode="decimal" id="cementPrice" placeholder="0"></div>
           <div class="field"><label>Kuntal</label><input type="number" min="0" inputmode="decimal" id="cementKuntal" placeholder="0"></div>
+        </div>
+        <div class="total-line" style="border-top:none; padding-top:8px; margin-top:0; font-size:12.5px;">
+          <span>Cement total</span><span id="out-cementSubtotal">0 ETB</span>
         </div>
       </div>
       <div class="field-grid">
@@ -562,7 +568,7 @@ function buildSkeleton(){
   $('prodDate').value = todayInputValue();
   $('saleDate').value = todayInputValue();
 
-  ['komicheCost','cementCost','laborCost','waterCost','otherCost'].forEach(id=>{
+  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{
     $(id).addEventListener('input', updateCostEntryTotal);
   });
   $('addCostBtn').addEventListener('click', addCostEntry);
@@ -626,7 +632,11 @@ function showScreen(name){
 
 /* ============ LIVE TOTAL (targeted, never rebuilds inputs) ============ */
 function updateCostEntryTotal(){
-  const total = num($('komicheCost').value) + num($('cementCost').value) + num($('laborCost').value) + num($('waterCost').value) + num($('otherCost').value);
+  const komicheCost = num($('komichePrice').value) * num($('komicheCars').value);
+  const cementCost = num($('cementPrice').value) * num($('cementKuntal').value);
+  $('out-komicheSubtotal').textContent = fmt(komicheCost) + ' ETB';
+  $('out-cementSubtotal').textContent = fmt(cementCost) + ' ETB';
+  const total = komicheCost + cementCost + num($('laborCost').value) + num($('waterCost').value) + num($('otherCost').value);
   $('out-costEntryTotal').textContent = fmt(total) + ' ETB';
 }
 function updateSaleEntryTotal(){
@@ -637,7 +647,7 @@ function updateSaleEntryTotal(){
 
 /* ============ ACTIONS ============ */
 function clearCostForm(){
-  ['komicheCost','komicheCars','cementCost','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
+  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
   $('costDate').value = todayInputValue();
   updateCostEntryTotal();
 }
@@ -653,10 +663,12 @@ function clearSaleForm(){
 
 function addCostEntry(){
   const dateStr = $('costDate').value || todayInputValue();
-  const komicheCost = num($('komicheCost').value);
+  const komichePrice = num($('komichePrice').value);
   const komicheCars = num($('komicheCars').value);
-  const cementCost = num($('cementCost').value);
+  const komicheCost = komichePrice * komicheCars;
+  const cementPrice = num($('cementPrice').value);
   const cementKuntal = num($('cementKuntal').value);
+  const cementCost = cementPrice * cementKuntal;
   const labor = num($('laborCost').value);
   const water = num($('waterCost').value);
   const other = num($('otherCost').value);
@@ -666,15 +678,16 @@ function addCostEntry(){
   const eth = ethFromDateStr(dateStr);
   const dateKey = ethDateKey(eth), monthKey = ethMonthKey(eth);
   const wasEditing = state.editing.cost;
+  const fields = { dateKey, monthKey, komichePrice, komicheCars, komicheCost, cementPrice, cementKuntal, cementCost, labor, water, other };
 
   if (wasEditing){
     const e = state.costEntries.find(x=>x.id===wasEditing);
-    if (e) Object.assign(e, { dateKey, monthKey, komicheCost, komicheCars, cementCost, cementKuntal, labor, water, other, updatedAt: Date.now() });
+    if (e) Object.assign(e, fields, { updatedAt: Date.now() });
     state.editing.cost = null;
     $('addCostBtn').textContent = 'Add cost entry';
     $('costCancelBtn').hidden = true;
   } else {
-    state.costEntries.push({ id: uid(), dateKey, monthKey, komicheCost, komicheCars, cementCost, cementKuntal, labor, water, other, createdAt: Date.now() });
+    state.costEntries.push(Object.assign({ id: uid(), createdAt: Date.now() }, fields));
   }
   saveCosts();
   clearCostForm();
@@ -751,10 +764,14 @@ function addSaleEntry(){
 function startEditCost(id){
   const e = state.costEntries.find(x=>x.id===id);
   if (!e) return;
+  // Older entries stored only the total cost, not a per-unit price - derive one so editing never
+  // silently zeroes out the cost if the price field is left untouched.
+  const komichePrice = e.komichePrice!=null ? e.komichePrice : (num(e.komicheCars)>0 ? e.komicheCost/e.komicheCars : '');
+  const cementPrice = e.cementPrice!=null ? e.cementPrice : (num(e.cementKuntal)>0 ? e.cementCost/e.cementKuntal : '');
   $('costDate').value = dateKeyToGregorianInput(e.dateKey);
-  $('komicheCost').value = e.komicheCost || '';
+  $('komichePrice').value = komichePrice;
   $('komicheCars').value = e.komicheCars || '';
-  $('cementCost').value = e.cementCost || '';
+  $('cementPrice').value = cementPrice;
   $('cementKuntal').value = e.cementKuntal || '';
   $('laborCost').value = e.labor || '';
   $('waterCost').value = e.water || '';
@@ -854,10 +871,12 @@ function rowXml(cells){ return `<Row>${cells.join('')}</Row>`; }
 
 function buildExportXml(){
   const costs = state.costEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
-  const costsHeader = rowXml(['Date','Komiche Cost','Komiche Cars','Cement Cost','Cement Kuntal','Labor','Water','Other','Total'].map(cellStr));
+  const costsHeader = rowXml(['Date','Komiche Price/Car','Komiche Cars','Komiche Cost','Cement Price/Kuntal','Cement Kuntal','Cement Cost','Labor','Water','Other','Total'].map(cellStr));
   const costsRows = costs.map(e=>rowXml([
-    cellStr(dayLabel(e.dateKey)), cellNum(e.komicheCost), cellNum(e.komicheCars),
-    cellNum(e.cementCost), cellNum(e.cementKuntal), cellNum(e.labor), cellNum(e.water), cellNum(e.other),
+    cellStr(dayLabel(e.dateKey)),
+    cellNum(unitPriceOf(e.komichePrice, e.komicheCost, e.komicheCars)), cellNum(e.komicheCars), cellNum(e.komicheCost),
+    cellNum(unitPriceOf(e.cementPrice, e.cementCost, e.cementKuntal)), cellNum(e.cementKuntal), cellNum(e.cementCost),
+    cellNum(e.labor), cellNum(e.water), cellNum(e.other),
     cellNum(e.komicheCost+e.cementCost+e.labor+e.water+e.other),
   ])).join('');
 
@@ -935,16 +954,22 @@ function renderReport(){
 }
 
 /* ============ RENDER: MONTHLY HISTORY ============ */
+function unitPriceOf(storedPrice, cost, qty){
+  return storedPrice!=null ? storedPrice : (num(qty)>0 ? cost/qty : 0);
+}
+
 function monthDetailHtml(key){
   const costs = state.costEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const prods = state.productionEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const sales = state.salesEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const costRows = costs.map(e=>{
     const total = e.komicheCost+e.cementCost+e.labor+e.water+e.other;
+    const komichePrice = unitPriceOf(e.komichePrice, e.komicheCost, e.komicheCars);
+    const cementPrice = unitPriceOf(e.cementPrice, e.cementCost, e.cementKuntal);
     return `<div class="entry-row">
       <div class="er-main">
         <div class="er-date">${dayLabel(e.dateKey)}</div>
-        <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal) &middot; Labor ${fmt(e.labor)} &middot; Water ${fmt(e.water)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
+        <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars @ ${fmt(komichePrice)}) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal @ ${fmt(cementPrice)}) &middot; Labor ${fmt(e.labor)} &middot; Water ${fmt(e.water)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
       </div>
       <div class="history-actions">
         <button onclick="startEditCost('${e.id}')">Edit</button>
