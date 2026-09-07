@@ -891,7 +891,44 @@ function cellStr(v){ return `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data>
 function cellNum(v){ return `<Cell><Data ss:Type="Number">${Number(v||0)}</Data></Cell>`; }
 function rowXml(cells){ return `<Row>${cells.join('')}</Row>`; }
 
+function buildSummaryRows(){
+  const monthKeys = allMonthKeys().slice().sort(); // chronological, oldest first, for a report
+  let grandCost = 0, grandRevenue = 0;
+  const grandQty = { s10:0, s15:0, s20:0 };
+
+  const rows = monthKeys.map(k=>{
+    const costSum = sumCosts(state.costEntries.filter(e=>e.monthKey===k));
+    const saleSum = sumSales(state.salesEntries.filter(e=>e.monthKey===k));
+    const cost = costTotal(costSum);
+    const revenue = salesRevenueTotal(saleSum);
+    grandCost += cost;
+    grandRevenue += revenue;
+    SIZES.forEach(sz=>{ grandQty[sz.key] += saleSum[sz.key].qty; });
+    return rowXml([
+      cellStr(monthLabel(k)),
+      cellNum(cost),
+      cellNum(saleSum.s10.qty), cellNum(saleSum.s15.qty), cellNum(saleSum.s20.qty), cellNum(salesQtyTotal(saleSum)),
+      cellNum(revenue),
+      cellNum(revenue - cost),
+    ]);
+  }).join('');
+
+  const grandQtyTotal = grandQty.s10 + grandQty.s15 + grandQty.s20;
+  const grandRow = rowXml([
+    cellStr('TOTAL (all time)'),
+    cellNum(grandCost),
+    cellNum(grandQty.s10), cellNum(grandQty.s15), cellNum(grandQty.s20), cellNum(grandQtyTotal),
+    cellNum(grandRevenue),
+    cellNum(grandRevenue - grandCost),
+  ]);
+
+  return rows + grandRow;
+}
+
 function buildExportXml(){
+  const summaryHeader = rowXml(['Month','Total Cost (ETB)','10" Sold','15" Sold','20" Sold','Total Sold','Total Revenue (ETB)','Profit / Loss (ETB)'].map(cellStr));
+  const summaryRows = buildSummaryRows();
+
   const costs = state.costEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const costsHeader = rowXml(['Date','Komiche Price/Car','Komiche Cars','Komiche Cost','Cement Price/Kuntal','Cement Kuntal','Cement Cost','Labor','Electric','Water','House Rent','Other','Total'].map(cellStr));
   const costsRows = costs.map(e=>rowXml([
@@ -925,6 +962,7 @@ function buildExportXml(){
   return `<?xml version="1.0"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Profit and Loss"><Table>${summaryHeader}${summaryRows}</Table></Worksheet>
  <Worksheet ss:Name="Costs"><Table>${costsHeader}${costsRows}</Table></Worksheet>
  <Worksheet ss:Name="Production"><Table>${prodHeader}${prodRows}</Table></Worksheet>
  <Worksheet ss:Name="Sales"><Table>${salesHeader}${salesRows}</Table></Worksheet>
