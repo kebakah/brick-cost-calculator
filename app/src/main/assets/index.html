@@ -169,6 +169,7 @@ const COST_ROWS = [
   { key:'labor', label:'Labor cost' },
   { key:'electric', label:'Electric' },
   { key:'water', label:'Water' },
+  { key:'rent', label:'House rent' },
   { key:'other', label:'Other' },
 ];
 const ETHIOPIAN_MONTHS = ['Meskerem','Tikimt','Hidar','Tahsas','Tir','Yekatit','Megabit','Miazia','Ginbot','Sene','Hamle','Nehase','Pagume'];
@@ -297,15 +298,15 @@ function salesInYearRange(year, monthMin, monthMax){
   });
 }
 function sumCosts(entries){
-  const s = { komicheCost:0, komicheCars:0, cementCost:0, cementKuntal:0, labor:0, electric:0, water:0, other:0 };
+  const s = { komicheCost:0, komicheCars:0, cementCost:0, cementKuntal:0, labor:0, electric:0, water:0, rent:0, other:0 };
   entries.forEach(e=>{
     s.komicheCost += num(e.komicheCost); s.komicheCars += num(e.komicheCars);
     s.cementCost += num(e.cementCost); s.cementKuntal += num(e.cementKuntal);
-    s.labor += num(e.labor); s.electric += num(e.electric); s.water += num(e.water); s.other += num(e.other);
+    s.labor += num(e.labor); s.electric += num(e.electric); s.water += num(e.water); s.rent += num(e.rent); s.other += num(e.other);
   });
   return s;
 }
-function costTotal(s){ return s.komicheCost + s.cementCost + s.labor + s.electric + s.water + s.other; }
+function costTotal(s){ return s.komicheCost + s.cementCost + s.labor + s.electric + s.water + s.rent + s.other; }
 function sumProduction(entries){
   const s = { s10:0, s15:0, s20:0 };
   entries.forEach(e=>{ SIZES.forEach(sz=>{ s[sz.key] += num(e.qty[sz.key]); }); });
@@ -390,6 +391,7 @@ function breakdownHtml(costSum, prodSum, salesSum, opts){
           <tr><td>Labor</td><td>${fmt(costSum.labor)} ETB</td><td></td></tr>
           <tr><td>Electric</td><td>${fmt(costSum.electric)} ETB</td><td></td></tr>
           <tr><td>Water</td><td>${fmt(costSum.water)} ETB</td><td></td></tr>
+          <tr><td>House rent</td><td>${fmt(costSum.rent)} ETB</td><td></td></tr>
           <tr><td>Other</td><td>${fmt(costSum.other)} ETB</td><td></td></tr>
           <tr class="grand"><td>Total cost</td><td class="amt">${fmt(total)} ETB</td><td></td></tr>
         </tbody>
@@ -460,6 +462,7 @@ function buildSkeleton(){
         <div class="field"><label>Labor cost</label><input type="number" min="0" inputmode="decimal" id="laborCost" placeholder="0"></div>
         <div class="field"><label>Electric</label><input type="number" min="0" inputmode="decimal" id="electricCost" placeholder="0"></div>
         <div class="field"><label>Water</label><input type="number" min="0" inputmode="decimal" id="waterCost" placeholder="0"></div>
+        <div class="field"><label>House rent</label><input type="number" min="0" inputmode="decimal" id="rentCost" placeholder="0"></div>
         <div class="field"><label>Other</label><input type="number" min="0" inputmode="decimal" id="otherCost" placeholder="0"></div>
       </div>
       <div class="total-line"><span>Total for this day</span><span class="amt" id="out-costEntryTotal">0 ETB</span></div>
@@ -577,7 +580,7 @@ function buildSkeleton(){
   $('prodDate').value = todayInputValue();
   $('saleDate').value = todayInputValue();
 
-  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','electricCost','waterCost','otherCost'].forEach(id=>{
+  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','electricCost','waterCost','rentCost','otherCost'].forEach(id=>{
     $(id).addEventListener('input', updateCostEntryTotal);
   });
   $('addCostBtn').addEventListener('click', addCostEntry);
@@ -645,7 +648,7 @@ function updateCostEntryTotal(){
   const cementCost = num($('cementPrice').value) * num($('cementKuntal').value);
   $('out-komicheSubtotal').textContent = fmt(komicheCost) + ' ETB';
   $('out-cementSubtotal').textContent = fmt(cementCost) + ' ETB';
-  const total = komicheCost + cementCost + num($('laborCost').value) + num($('electricCost').value) + num($('waterCost').value) + num($('otherCost').value);
+  const total = komicheCost + cementCost + num($('laborCost').value) + num($('electricCost').value) + num($('waterCost').value) + num($('rentCost').value) + num($('otherCost').value);
   $('out-costEntryTotal').textContent = fmt(total) + ' ETB';
 }
 function updateSaleEntryTotal(){
@@ -656,7 +659,7 @@ function updateSaleEntryTotal(){
 
 /* ============ ACTIONS ============ */
 function clearCostForm(){
-  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','electricCost','waterCost','otherCost'].forEach(id=>{ $(id).value = ''; });
+  ['komichePrice','komicheCars','cementPrice','cementKuntal','laborCost','electricCost','waterCost','rentCost','otherCost'].forEach(id=>{ $(id).value = ''; });
   $('costDate').value = todayInputValue();
   updateCostEntryTotal();
 }
@@ -681,14 +684,15 @@ function addCostEntry(){
   const labor = num($('laborCost').value);
   const electric = num($('electricCost').value);
   const water = num($('waterCost').value);
+  const rent = num($('rentCost').value);
   const other = num($('otherCost').value);
-  const total = komicheCost + cementCost + labor + electric + water + other;
+  const total = komicheCost + cementCost + labor + electric + water + rent + other;
   if (total<=0){ showToast('Enter at least one cost amount'); return; }
 
   const eth = ethFromDateStr(dateStr);
   const dateKey = ethDateKey(eth), monthKey = ethMonthKey(eth);
   const wasEditing = state.editing.cost;
-  const fields = { dateKey, monthKey, komichePrice, komicheCars, komicheCost, cementPrice, cementKuntal, cementCost, labor, electric, water, other };
+  const fields = { dateKey, monthKey, komichePrice, komicheCars, komicheCost, cementPrice, cementKuntal, cementCost, labor, electric, water, rent, other };
 
   if (wasEditing){
     const e = state.costEntries.find(x=>x.id===wasEditing);
@@ -788,6 +792,7 @@ function startEditCost(id){
   $('cementKuntal').value = e.cementKuntal || '';
   $('laborCost').value = e.labor || '';
   $('electricCost').value = e.electric || '';
+  $('rentCost').value = e.rent || '';
   $('waterCost').value = e.water || '';
   $('otherCost').value = e.other || '';
   updateCostEntryTotal();
@@ -888,13 +893,13 @@ function rowXml(cells){ return `<Row>${cells.join('')}</Row>`; }
 
 function buildExportXml(){
   const costs = state.costEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
-  const costsHeader = rowXml(['Date','Komiche Price/Car','Komiche Cars','Komiche Cost','Cement Price/Kuntal','Cement Kuntal','Cement Cost','Labor','Electric','Water','Other','Total'].map(cellStr));
+  const costsHeader = rowXml(['Date','Komiche Price/Car','Komiche Cars','Komiche Cost','Cement Price/Kuntal','Cement Kuntal','Cement Cost','Labor','Electric','Water','House Rent','Other','Total'].map(cellStr));
   const costsRows = costs.map(e=>rowXml([
     cellStr(dayLabel(e.dateKey)),
     cellNum(unitPriceOf(e.komichePrice, e.komicheCost, e.komicheCars)), cellNum(e.komicheCars), cellNum(e.komicheCost),
     cellNum(unitPriceOf(e.cementPrice, e.cementCost, e.cementKuntal)), cellNum(e.cementKuntal), cellNum(e.cementCost),
-    cellNum(e.labor), cellNum(e.electric), cellNum(e.water), cellNum(e.other),
-    cellNum(num(e.komicheCost)+num(e.cementCost)+num(e.labor)+num(e.electric)+num(e.water)+num(e.other)),
+    cellNum(e.labor), cellNum(e.electric), cellNum(e.water), cellNum(e.rent), cellNum(e.other),
+    cellNum(num(e.komicheCost)+num(e.cementCost)+num(e.labor)+num(e.electric)+num(e.water)+num(e.rent)+num(e.other)),
   ])).join('');
 
   const prods = state.productionEntries.slice().sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
@@ -1013,13 +1018,13 @@ function monthDetailHtml(key){
   const prods = state.productionEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const sales = state.salesEntries.filter(e=>e.monthKey===key).sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
   const costRows = costs.map(e=>{
-    const total = num(e.komicheCost)+num(e.cementCost)+num(e.labor)+num(e.electric)+num(e.water)+num(e.other);
+    const total = num(e.komicheCost)+num(e.cementCost)+num(e.labor)+num(e.electric)+num(e.water)+num(e.rent)+num(e.other);
     const komichePrice = unitPriceOf(e.komichePrice, e.komicheCost, e.komicheCars);
     const cementPrice = unitPriceOf(e.cementPrice, e.cementCost, e.cementKuntal);
     return `<div class="entry-row">
       <div class="er-main">
         <div class="er-date">${dayLabel(e.dateKey)}</div>
-        <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars @ ${fmt(komichePrice)}) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal @ ${fmt(cementPrice)}) &middot; Labor ${fmt(e.labor)} &middot; Electric ${fmt(e.electric)} &middot; Water ${fmt(e.water)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
+        <div>Komiche ${fmt(e.komicheCost)} (${fmt(e.komicheCars)} cars @ ${fmt(komichePrice)}) &middot; Cement ${fmt(e.cementCost)} (${fmt(e.cementKuntal)} kuntal @ ${fmt(cementPrice)}) &middot; Labor ${fmt(e.labor)} &middot; Electric ${fmt(e.electric)} &middot; Water ${fmt(e.water)} &middot; Rent ${fmt(e.rent)} &middot; Other ${fmt(e.other)} &mdash; <strong>${fmt(total)} ETB</strong></div>
       </div>
       <div class="history-actions">
         <button onclick="startEditCost('${e.id}')">Edit</button>
